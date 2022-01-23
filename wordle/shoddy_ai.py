@@ -1,13 +1,14 @@
 # requirements: python3.8+, numpy
 #
-# This script is very verbose.
+# This script is very verbose by default.
 # That's to distract you from it being very slow
 # for the first iteration.
 # But you can make it quiet with the QUIET argument.
 #
 # Invocation:
 # > python3 shoddy_ai.py $WORD_LENGTH $ITERATIONS_TO_SKIP $GOAL [QUIET]
-# You may want to skip 1 iteration, because it's very slow
+# You may want to skip 1 iteration's computation, because it takes a
+# few minutes
 # to compute the best first word, and you just want to know the best
 # 2nd word given the 1st word you already input.
 # For goal, put either MINIMAX or MEAN depending on whether you want
@@ -21,6 +22,9 @@
 # > what was the result? c0a1t2s0
 # The number following each letter indicates its color: 0 for gray,
 # 1 for yellow, 2 for red.
+#
+# This script points to the clone's word lists (https://wordlegame.org/).
+# If you want the original, hard code USE_ORIGINAL=True
 
 import sys
 import numpy as np
@@ -43,8 +47,10 @@ bests_len = 5
 def filter_to_len(words):
   return [word for word in words if len(word) == n]
 
-vocabulary = filter_to_len(open('vocabulary.txt').read().split('\n'))
-answers = filter_to_len(open('answers.txt').read().split('\n'))
+USE_ORIGINAL = False
+prefix = 'orig_' if USE_ORIGINAL else ''
+vocabulary = filter_to_len(open(f'{prefix}vocabulary.txt').read().split('\n'))
+answers = filter_to_len(open(f'{prefix}answers.txt').read().split('\n'))
 
 print(f'{len(vocabulary)=} {len(answers)=}')
 
@@ -173,8 +179,6 @@ def get_outcome_int(guess, answer):
       counts[guess[i]] -= 1
   return outcome_int
     
-    
-
 def calc_score(word, valid_answers, constraints):
   score = 0 # higher is better
   accounted = 0
