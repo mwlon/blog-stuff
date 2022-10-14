@@ -10,3 +10,6 @@ Example:
 <img src="./example_source.jpg" width="45%" alt="source image">
 <img src="./example_dest.jpg" width="45%" alt="dest image">
 </div>
+
+It also outputs a "color palette" showing the position, color, and size of each centroid:
+<img src="./example_color_palette.png" alt="color palette">
