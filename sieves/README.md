@@ -5,4 +5,4 @@ Contents:
 * eratosthenes.jl
 * eratosthenes.py
 
-Each includes a fast implementation of the named sieving algorithm in the particular programming language.
+Each includes a fast-ish implementation of the named sieving algorithm in the particular programming language.
