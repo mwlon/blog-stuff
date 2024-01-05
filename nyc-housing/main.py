@@ -32,6 +32,7 @@ class Scenario:
   # marginal tax rates
   federal_tax_rate: float = 0.37
   state_tax_rate: float = 0.0685 + 0.03876
+  capital_gains_rate: float = 0.2
 
   def __str__(self):
     return self.name
@@ -161,7 +162,10 @@ def calc(s):
   debt[1:n + 1] = loan - np.cumsum(principal_payment)
   final_debt = debt[-1]
   # final money recovered by selling home (after paying off the rest of debt to bank)
-  res[2, -1] = final_debt - s.price * s.real_estate_return ** s.years
+  sell_price = s.price * s.real_estate_return ** s.years
+  sell_profit = sell_price - s.price
+  sell_taxes = max(0, sell_profit - 500000) * s.capital_gains_rate
+  res[2, -1] = final_debt + sell_taxes - sell_price
 
   # 3: INTEREST
   res[3, :n] = fixed_payment - principal_payment
@@ -190,7 +194,7 @@ scenarios = [
     price=2000000 - 1,
     taxes=20000,
     maintenance=18000,
-    years=30,
+    years=20,
   ),
   Scenario(
     "2M cash",
@@ -199,7 +203,7 @@ scenarios = [
     taxes=20000,
     maintenance=18000,
     down_payment_ratio=1.0,
-    years=30,
+    years=20,
   ),
 ]
  
