@@ -5,7 +5,7 @@ import polars as pl
 import argparse
 import traditional
 from lattice import build_lattice, triples_for_triangles
-import utils
+from math_utils import calc_areas_angles_lengths, calc_inv_atlas, calc_tangent_vecs, area_angle_loss, filter_trained, calc_euc, calc_distortion
 import serialization
 
 parser = argparse.ArgumentParser()
@@ -31,6 +31,12 @@ parser.add_argument(
   action='store_true',
   help='connect trained projections with a line instead of labeling them',
 )
+parser.add_argument(
+  '--ignore',
+  type=str,
+  default='lambert',
+  help='list of traditional projections to ignore',
+)
 args = parser.parse_args()
 
 names = []
@@ -39,17 +45,26 @@ angle_losses = []
 is_trained = []
 
 def add_traditional():
+  ignore_substrs = args.ignore.split(',')
+
   lattice = build_lattice(args.side_n)
   sph = lattice.sph
   euc = lattice.euc
   triangles = traditional.filter_triangles(lattice.triangles, traditional.calc_filter(sph, args.compare_latitude))
   triples = triples_for_triangles(triangles)
   inv_metric = traditional.calc_inv_metric(sph)
-  areas, angles, _, _ = utils.calc_areas_angles_lengths(euc, triples)
+  areas, angles, _, _ = calc_areas_angles_lengths(euc, triples)
   
   for projection in traditional.projections:
+    ignore = False
+    for substr in ignore_substrs:
+      if substr in projection.name.lower():
+        ignore = True
+    if ignore:
+      continue
+    
     distortion = traditional.calc_distortion(projection, sph, inv_metric)[triples[:, 1]]
-    area_loss, angle_loss = utils.area_angle_loss(distortion, areas, angles)
+    area_loss, angle_loss = area_angle_loss(distortion, areas * angles)
     area_loss = area_loss.item()
     angle_loss = angle_loss.item()
 
@@ -60,17 +75,17 @@ def add_traditional():
     print(f'{projection.name},{area_loss},{angle_loss}')
 
 def add_trained():
-  for name in utils.filter_trained(args.filter):
+  for name in filter_trained(args.filter):
     loaded = serialization.load(name)
     sph = loaded.sph
-    euc = utils.calc_euc(sph)
+    euc = calc_euc(sph)
     triangles = traditional.filter_triangles(loaded.triangles, traditional.calc_filter(sph, args.compare_latitude))
     triples = triples_for_triangles(triangles)
-    areas, angles, uv_len, wv_len = utils.calc_areas_angles_lengths(euc, triples)
-    inv_atlas = utils.calc_inv_atlas(angles, uv_len, wv_len)
-    tangent_vecs = utils.calc_tangent_vecs(loaded.xy, triples)
-    distortion = utils.calc_distortion(inv_atlas, tangent_vecs)
-    area_loss, angle_loss = utils.area_angle_loss(distortion, areas, angles)
+    areas, angles, uv_len, wv_len = calc_areas_angles_lengths(euc, triples)
+    inv_atlas = calc_inv_atlas(angles, uv_len, wv_len)
+    tangent_vecs = calc_tangent_vecs(loaded.xy, triples)
+    distortion = calc_distortion(inv_atlas, tangent_vecs)
+    area_loss, angle_loss = area_angle_loss(distortion, areas * angles)
     area_loss = area_loss.item()
     angle_loss = angle_loss.item()
 
@@ -88,7 +103,7 @@ angle_losses = np.array(angle_losses)
 
 font = {'family':'sans-serif', 'size':12}
 matplotlib.rc('font', **font)
-fig, ax = plt.subplots(figsize=(11,8))
+fig, ax = plt.subplots(figsize=(11,5))
 
 ax.spines['top'].set_visible(False)
 ax.spines['right'].set_visible(False)

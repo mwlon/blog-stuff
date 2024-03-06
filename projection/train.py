@@ -8,7 +8,7 @@ import optax
 from jax import jit, grad, vmap
 from map_utils import plot_map, plot_mults
 from lattice import build_lattice, triples_for_triangles
-from math_utils import arclength_between, plane_angle_between, calc_inv_atlas, calc_angles_lengths_areas, area_angle_loss, area_angle_multipliers, calc_tangent_vecs, calc_distortion
+from math_utils import arclength_between, plane_angle_between, calc_inv_atlas, calc_areas_angles_lengths, area_angle_loss, area_angle_multipliers, calc_tangent_vecs, calc_distortion
 import time
 from tqdm import tqdm
 from jaxopt import LBFGS
@@ -105,8 +105,7 @@ n = sph.shape[0]
 
 areas, angles, uv_length, wv_length = calc_areas_angles_lengths(euc, triples)
 inv_atlas = calc_inv_atlas(angles, uv_length, wv_length)
-angle_weight = angles
-area_weight = areas
+weight = areas * angles
 
 print('initializing...')
 triples = jnp.array(triples)
@@ -118,7 +117,7 @@ xy = traditional.calc_xy(initial_projection, sph)
 def loss(xy):
   tangent_vecs = calc_tangent_vecs(xy, triples)
   distortion = calc_distortion(inv_atlas, tangent_vecs)
-  area_loss, angle_loss = area_angle_loss(distortion, area_weight, angle_weight)
+  area_loss, angle_loss = area_angle_loss(distortion, weight)
   return area_loss_prop * area_loss + (1 - area_loss_prop) * angle_loss
 
 if args.schedule == 'cosine':
@@ -193,12 +192,9 @@ print(f'xy stdev: {jnp.std(xy[:, 0])} {jnp.std(xy[:, 1])}')
 print('plotting...')
 os.makedirs(f'results/{name}', exist_ok=True)
 plot_map(name, sph, xy, triangles, draw_lines=args.draw_lines, show=args.show)
+
 tangent_vecs = calc_tangent_vecs(xy, triples)
 distortion = calc_distortion(inv_atlas, tangent_vecs)
-if args.distortion_plots:
-  area_mults, angle_mults = area_angle_multipliers(distortion)
-  plot_mults(name, xy, triangles, area_mults, angle_mults)
-
-area_loss, angle_loss = area_angle_loss(distortion, angle_weight, area_weight)
+area_loss, angle_loss = area_angle_loss(distortion, weight)
 print(f'{area_loss.item()=} {angle_loss.item()=}')
 

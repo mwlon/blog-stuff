@@ -82,16 +82,18 @@ class Projection:
   name: str
   f: Callable
   lat_limit: float = 90
+  equal_area: bool = False
+  conformal: bool = False
 
 projections = [
   # conformal
-  Projection('Mercator', mercator, lat_limit = 85),
+  Projection('Mercator', mercator, lat_limit = 85, conformal=True),
 
   # equal area
-  Projection('Eckert IV', eckert_iv),
-  Projection('Lambert', lambert),
-  Projection('Equal Earth', equal_earth),
-  Projection('Mollweide', mollweide),
+  Projection('Eckert IV', eckert_iv, equal_area=True),
+  Projection('Lambert', lambert, equal_area=True),
+  Projection('Equal Earth', equal_earth, equal_area=True),
+  Projection('Mollweide', mollweide, equal_area=True),
 
   # compromise
   Projection('Equirectangular', equirectangular),

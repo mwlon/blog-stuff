@@ -4,7 +4,7 @@ from map_utils import plot_map
 from tqdm import tqdm
 import serialization
 import os
-import utils
+import math_utils
 
 parser = argparse.ArgumentParser()
 parser.add_argument(
@@ -21,7 +21,7 @@ parser.add_argument(
 )
 parser.add_argument(
   '--steps-per',
-  type=float,
+  type=int,
   default=12,
   help='how many steps go in between each projection',
 )
@@ -29,7 +29,7 @@ parser.add_argument(
 args = parser.parse_args()
 title = args.title
 steps_per = args.steps_per
-names = utils.filter_trained(args.filter)
+names = math_utils.filter_trained(args.filter)
 print(f'filtered to: {names}')
 
 os.makedirs(f'results/{title}', exist_ok=True)

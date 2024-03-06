@@ -80,10 +80,9 @@ def raw_area_angle_loss(distortion):
   area_mult, angle_mult = area_angle_multipliers(distortion)
   return ratio_loss(area_mult), ratio_loss(angle_mult)
 
-def area_angle_loss(distortion, angle_weight, area_weight):
+def area_angle_loss(distortion, weight):
   area_loss, angle_loss = raw_area_angle_loss(distortion)
 
-  weight = area_weight * angle_weight
   total_weight = jnp.sum(weight)
   area_loss = jnp.sum(area_loss * weight) / total_weight
   angle_loss = jnp.sum(angle_loss * weight) / total_weight

@@ -2,7 +2,7 @@
 set -eoux pipefail
 
 # add more proportions here
-for p in 001 999; do
+for p in 001 003 010 030 100 200 300 400 500 600 700 800 900 970 990 997 999; do
   if [[ $p -lt 150 || $p -gt 850 ]]; then
     iters=8000
   else
