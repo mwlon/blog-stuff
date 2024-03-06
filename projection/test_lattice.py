@@ -37,7 +37,6 @@ def test_triangles_for_rows():
   ])
 
   triangles = triangles_for_rows(RowSpec(0, 3), RowSpec(3, 9), toggle_left=True)
-  print(triangles)
   np.testing.assert_array_equal(triangles, [
     [0, 5, 1],
     [1, 9, 2],

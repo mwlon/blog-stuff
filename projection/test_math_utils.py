@@ -185,13 +185,4 @@ def test_mults_for_triangle():
   tangent_vecs = calc_tangent_vecs(xy, triples)
   atlas = np.linalg.inv(inv_atlas[0])
   distortion = np.linalg.solve(atlas.T, tangent_vecs.T).T
-  print('svd', np.linalg.svd(distortion))
-  print('atlas', repr(atlas))
-  print('inv atlas', repr(inv_atlas))
-  print('t vecs', repr(tangent_vecs))
-  print('distortion', repr(inv_atlas @ tangent_vecs))
-  print('distortion again', repr(distortion))
-  print('recovered t vecs', distortion @ atlas)
-  print(angles, 'vs', angle_between(tangent_vecs[0, :, 0], tangent_vecs[0, :, 1]))
   area_mults, angle_mults = area_angle_multipliers(distortion)
-  print(area_mults, angle_mults)
