@@ -6,7 +6,7 @@ import argparse
 import jax
 import optax
 from jax import jit, grad, vmap
-from map_utils import plot_map, plot_mults
+from map_utils import plot_map, plot_mults, calc_water_prop
 from lattice import build_lattice, triples_for_triangles
 from math_utils import arclength_between, plane_angle_between, calc_inv_atlas, calc_areas_angles_lengths, area_angle_loss, area_angle_multipliers, calc_tangent_vecs, calc_distortion
 import time
@@ -89,6 +89,12 @@ parser.add_argument(
   default='natural earth',
   help='initial conditions for map projections',
 )
+parser.add_argument(
+  '--water-angle-loss-mult',
+  type=float,
+  default=1.0,
+  help='how much to multiply angular loss in water by',
+)
 
 args = parser.parse_args()
 name = args.name
@@ -105,7 +111,9 @@ n = sph.shape[0]
 
 areas, angles, uv_length, wv_length = calc_areas_angles_lengths(euc, triples)
 inv_atlas = calc_inv_atlas(angles, uv_length, wv_length)
-weight = areas * angles
+water_mult = 1 + (args.water_angle_loss_mult - 1) * calc_water_prop(sph, triples)
+area_weight = areas * angles
+angle_weight = areas * angles * water_mult
 
 print('initializing...')
 triples = jnp.array(triples)
@@ -117,7 +125,7 @@ xy = traditional.calc_xy(initial_projection, sph)
 def loss(xy):
   tangent_vecs = calc_tangent_vecs(xy, triples)
   distortion = calc_distortion(inv_atlas, tangent_vecs)
-  area_loss, angle_loss = area_angle_loss(distortion, weight)
+  area_loss, angle_loss = area_angle_loss(distortion, area_weight, angle_weight)
   return area_loss_prop * area_loss + (1 - area_loss_prop) * angle_loss
 
 if args.schedule == 'cosine':
@@ -195,6 +203,6 @@ plot_map(name, sph, xy, triangles, draw_lines=args.draw_lines, show=args.show)
 
 tangent_vecs = calc_tangent_vecs(xy, triples)
 distortion = calc_distortion(inv_atlas, tangent_vecs)
-area_loss, angle_loss = area_angle_loss(distortion, weight)
+area_loss, angle_loss = area_angle_loss(distortion, area_weight, angle_weight)
 print(f'{area_loss.item()=} {angle_loss.item()=}')
 

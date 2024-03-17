@@ -41,6 +41,12 @@ parser.add_argument(
   action='store_true',
   help='whether to overlay triangles on map',
 )
+parser.add_argument(
+  '--scale',
+  type=int,
+  default=1024,
+  help='how large of a map to make',
+)
 
 args = parser.parse_args()
 show = args.show
@@ -56,7 +62,7 @@ if args.all_traditional:
     print(f'{projection.name}...')
     os.makedirs(f'results/{projection.name}', exist_ok=True)
     xy, filtered_triangles = traditional.project(projection, sph, lattice.triangles)
-    plot_map(projection.name, sph, xy, filtered_triangles, show=show, draw_lines=args.draw_lines)
+    plot_map(projection.name, sph, xy, filtered_triangles, show=show, draw_lines=args.draw_lines, scale=args.scale)
 
     if args.distortion:
       triples = triples_for_triangles(lattice.triangles)
@@ -73,7 +79,7 @@ if args.trained is not None:
   sph = loaded.sph
   xy = loaded.xy
   triangles = loaded.triangles
-  plot_map(name, sph, xy, triangles, show=show, draw_lines=args.draw_lines)
+  plot_map(name, sph, xy, triangles, show=show, draw_lines=args.draw_lines, scale=args.scale)
 
   if args.distortion:
     euc = calc_euc(sph)

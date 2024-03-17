@@ -193,3 +193,28 @@ def plot_mults(
   plt.savefig(f'results/{name}/mults.png')
   if show:
     plt.show()
+
+def detect_water():
+  earth = cv2.imread('land_shallow_topo_8192.tif')
+  b, g, r = earth.transpose([2, 0, 1])
+  return (b > 50) & (g < 50) & (r < 50)
+
+def calc_water_prop(sph, triples):
+  res = np.zeros(triples.shape[0])
+  is_water = detect_water()
+  h, w = is_water.shape
+
+  for i, idxs in enumerate(triples):
+    sub_sph = sph[idxs]
+    in_xs = sub_sph[:, 0] / TAU * w
+    in_ys = sub_sph[:, 1] / (TAU / 2) * h
+    in_pts = np.stack([in_xs, in_ys], axis=1)
+
+    in_i0, in_i1, in_j0, in_j1, in_dh, in_dw = bbox(in_pts)
+    sub_image = is_water[in_i0:in_i1, in_j0:in_j1].copy()
+    mask = np.zeros(sub_image.shape, dtype=np.float32)
+    in_dpts = (in_pts - np.array([in_j0, in_i0])[None, :]).astype(np.int32)
+    cv2.fillConvexPoly(mask, in_dpts, 1.0, shift=8)
+    res[i] = np.sum(mask * sub_image) / np.sum(mask)
+    
+  return res
