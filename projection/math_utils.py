@@ -117,3 +117,8 @@ def calc_euc(sph):
   y = sinphi * np.sin(theta)
   z = np.cos(phi)
   return np.stack([x, y, z], axis=1)
+
+def rotate(xy, rot):
+  rot_mat = np.array([[np.cos(rot), -np.sin(rot)], [np.sin(rot), np.cos(rot)]])
+  return (rot_mat @ xy.transpose()).transpose()
+  

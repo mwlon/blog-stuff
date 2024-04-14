@@ -180,6 +180,7 @@ def plot_mults(
   area_mults, # 3k
   angle_mults, # 3k
   show: bool = True,
+  title: Optional[str] = None,
 ):
   #https://matplotlib.org/stable/gallery/images_contours_and_fields/triinterp_demo.html#sphx-glr-gallery-images-contours-and-fields-triinterp-demo-py
   mpl.rc('font', family='sans-serif', size=15)
@@ -190,6 +191,8 @@ def plot_mults(
   fig, (ax0, ax1) = plt.subplots(2, figsize=(9, 10))
   plot_single_mults(xy_triangles, area_mults, ax0, 'areal')
   plot_single_mults(xy_triangles, angle_mults, ax1, 'angular')
+  if title is not None:
+    fig.suptitle(title, fontsize=16)
   plt.savefig(f'results/{name}/mults.png')
   if show:
     plt.show()

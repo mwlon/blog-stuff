@@ -4,10 +4,11 @@ from map_utils import plot_map, plot_mults
 from lattice import build_lattice, triples_for_triangles
 import traditional
 import serialization
-from math_utils import calc_areas_angles_lengths, area_angle_multipliers, calc_inv_atlas, calc_euc, calc_tangent_vecs, calc_distortion
+from math_utils import calc_areas_angles_lengths, area_angle_multipliers, calc_inv_atlas, calc_euc, calc_tangent_vecs, calc_distortion, rotate
 import numpy as np
 
 MAX_MULT = 100.0
+TAU = 2 * np.pi
 
 parser = argparse.ArgumentParser()
 parser.add_argument(
@@ -47,12 +48,28 @@ parser.add_argument(
   default=1024,
   help='how large of a map to make',
 )
+parser.add_argument(
+  '--rotate-degrees',
+  type=float,
+  default=0.0,
+  help='how much to rotate the plot by',
+)
+parser.add_argument(
+  '--title',
+  type=str,
+  default=None,
+  help='title to write on the distortion plot of a trained projection',
+)
 
 args = parser.parse_args()
 show = args.show
 
 def safe_mult(mult, default):
   return np.minimum(np.nan_to_num(mult, nan=default, posinf=default, neginf=default), MAX_MULT)
+
+def rotate_(xy):
+  rot = args.rotate_degrees * TAU / 360
+  return rotate(xy, rot)
 
 if args.all_traditional:
   lattice = build_lattice(args.side_n, include_degenerate=True)
@@ -62,6 +79,7 @@ if args.all_traditional:
     print(f'{projection.name}...')
     os.makedirs(f'results/{projection.name}', exist_ok=True)
     xy, filtered_triangles = traditional.project(projection, sph, lattice.triangles)
+    xy = rotate_(xy)
     plot_map(projection.name, sph, xy, filtered_triangles, show=show, draw_lines=args.draw_lines, scale=args.scale)
 
     if args.distortion:
@@ -71,13 +89,14 @@ if args.all_traditional:
       area_mults, angle_mults = area_angle_multipliers(distortion)
       area_mults = safe_mult(area_mults, default=1.0 if projection.equal_area else MAX_MULT)
       angle_mults = safe_mult(angle_mults, default=1.0 if projection.conformal else MAX_MULT)
-      plot_mults(projection.name, xy, lattice.triangles, area_mults, angle_mults, show=show)
+      plot_mults(projection.name, xy, lattice.triangles, area_mults, angle_mults, show=show, title=projection.name)
 
 if args.trained is not None:
   name = args.trained
   loaded = serialization.load(name)
   sph = loaded.sph
   xy = loaded.xy
+  xy = rotate_(xy)
   triangles = loaded.triangles
   plot_map(name, sph, xy, triangles, show=show, draw_lines=args.draw_lines, scale=args.scale)
 
@@ -89,4 +108,4 @@ if args.trained is not None:
     tangent_vecs = calc_tangent_vecs(xy, triples)
     distortion = calc_distortion(inv_atlas, tangent_vecs)
     area_mults, angle_mults = area_angle_multipliers(distortion)
-    plot_mults(name, xy, triangles, area_mults, angle_mults, show=show)
+    plot_mults(name, xy, triangles, area_mults, angle_mults, show=show, title=args.title)

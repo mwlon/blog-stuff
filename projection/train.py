@@ -8,7 +8,7 @@ import optax
 from jax import jit, grad, vmap
 from map_utils import plot_map, plot_mults, calc_water_prop
 from lattice import build_lattice, triples_for_triangles
-from math_utils import arclength_between, plane_angle_between, calc_inv_atlas, calc_areas_angles_lengths, area_angle_loss, area_angle_multipliers, calc_tangent_vecs, calc_distortion
+from math_utils import arclength_between, plane_angle_between, calc_inv_atlas, calc_areas_angles_lengths, area_angle_loss, area_angle_multipliers, calc_tangent_vecs, calc_distortion, rotate
 import time
 from tqdm import tqdm
 from jaxopt import LBFGS
@@ -95,6 +95,10 @@ parser.add_argument(
   default=1.0,
   help='how much to multiply angular loss in water by',
 )
+parser.add_argument(
+  '--more-interrupted',
+  action='store_true',
+)
 
 args = parser.parse_args()
 name = args.name
@@ -102,7 +106,7 @@ n_iters = args.n_iters
 area_loss_prop = args.area_loss_prop
 
 print('computing lattice...')
-lattice = build_lattice(args.side_n)
+lattice = build_lattice(args.side_n, more_interrupted=args.more_interrupted)
 sph = lattice.sph
 euc = lattice.euc
 triples = lattice.triples
@@ -132,6 +136,8 @@ if args.schedule == 'cosine':
   schedule = optax.cosine_decay_schedule(args.base_lr, decay_steps=args.n_iters + 1, alpha = 0.01)
 elif args.schedule == 'const':
   schedule = args.base_lr
+elif args.schedule == 'ramp':
+  schedule = optax.linear_schedule(args.base_lr, args.base_lr * 3, transition_steps=2000)
 else:
   raise Exception('unknown learning rate schedule')
 
@@ -186,12 +192,11 @@ for (opt_i, opt_name) in enumerate(opts):
     maybe_log(end)
 
 # rotate so map is straight up
-n_pole = xy[0]
+n_pole = np.mean(xy[sph[:, 1] == 0], axis=0)
 xy -= n_pole
-s_pole = xy[-1]
-rot = TAU / 4 + jnp.arctan2(s_pole[1], s_pole[0])
-rot_mat = jnp.array([[np.cos(rot), np.sin(rot)], [-np.sin(rot), np.cos(rot)]])
-xy = (rot_mat @ xy.transpose()).transpose()
+s_pole = np.mean(xy[sph[:, 1] == TAU / 2], axis=0)
+rot = -(TAU / 4 + np.arctan2(s_pole[1], s_pole[0]))
+xy = rotate(xy, rot)
 
 print('saving...')
 serialization.save(name, sph, triangles, xy)

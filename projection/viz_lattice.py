@@ -45,18 +45,22 @@ parser.add_argument(
   type=str,
   help='which direction to view from',
 )
+parser.add_argument(
+  '--more-interrupted',
+  action='store_true',
+)
 
 args = parser.parse_args()
 
-pts = lattice.grid_pts(args.side_n)
-print('n pts', pts.euclidean.shape[0])
+pts = lattice.build_lattice(args.side_n, more_interrupted=args.more_interrupted)
+print('n pts', pts.euc.shape[0])
 print('n triangles', pts.triangles.shape[0])
 print('n triples', pts.triples.shape[0])
 fig = plt.figure(figsize=(10, 10))
 ax = fig.add_subplot(111, projection='3d')
 
 for triple in pts.triples:
-  euc = pts.euclidean[triple]
+  euc = pts.euc[triple]
   min_z = np.min(euc, axis=0)[2]
   if min_z < args.z_cutoff:
     continue
