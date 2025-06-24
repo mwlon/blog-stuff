@@ -19,6 +19,11 @@ import serialization
 
 TAU = 2 * jnp.pi
 
+jax.config.update("jax_compilation_cache_dir", "/tmp/jax_cache")
+jax.config.update("jax_persistent_cache_min_entry_size_bytes", -1)
+jax.config.update("jax_persistent_cache_min_compile_time_secs", 0)
+jax.config.update("jax_persistent_cache_enable_xla_caches", "xla_gpu_per_fusion_autotune_cache_dir")
+
 parser = argparse.ArgumentParser()
 parser.add_argument(
   '--n-iters',
@@ -105,14 +110,45 @@ parser.add_argument(
   '--more-interrupted',
   action='store_true',
 )
+parser.add_argument(
+  '--no-plot',
+  action='store_true',
+)
 
 args = parser.parse_args()
 name = args.name
 n_iters = args.n_iters
 area_loss_prop = args.area_loss_prop
 
-print('computing lattice...')
-lattice = build_lattice(args.side_n, more_interrupted=args.more_interrupted)
+print('initializing...')
+if args.meme_key is None:
+  initial = args.initial.lower()
+  try:
+    initial_projection = next(proj for proj in traditional.projections if proj.name.lower() == initial)
+    print('[traditional projection initialization] computing lattice...')
+    lattice = build_lattice(args.side_n, more_interrupted=args.more_interrupted)
+    params = traditional.calc_xy(initial_projection, sph)
+  except StopIteration:
+    proj = serialization.load(initial)
+    print('[pretrained projection initialization] reusing lattice...')
+    lattice = proj.lattice()
+    params = proj.xy
+  def calc_xy(params):
+    return params
+else:
+  print('[meme initialization] computing lattice...')
+  lattice = build_lattice(args.side_n, more_interrupted=args.more_interrupted)
+  initializer = jax.nn.initializers.he_normal()
+  hd = 16
+  key = args.meme_key
+  params = [
+    initializer(jax.random.key(key), (2, hd), jnp.float32),
+    jax.random.normal(jax.random.key(key + 1), (hd,), jnp.float32),
+    initializer(jax.random.key(key + 2), (hd, 2), jnp.float32),
+  ]
+  def calc_xy(params):
+    return jax.nn.tanh(sph / jnp.array([TAU, TAU / 2]) @ params[0] + params[1]) @ params[2]
+
 sph = lattice.sph
 euc = lattice.euc
 triples = lattice.triples
@@ -125,26 +161,8 @@ water_mult = 1 + (args.water_angle_loss_mult - 1) * calc_water_prop(sph, triples
 area_weight = areas * angles
 angle_weight = areas * angles * water_mult
 
-print('initializing...')
 triples = jnp.array(triples)
 
-if args.meme_key is None:
-  initial = args.initial.lower()
-  initial_projection = next(proj for proj in traditional.projections if proj.name.lower() == initial)
-  params = traditional.calc_xy(initial_projection, sph)
-  def calc_xy(xy):
-    return xy
-else:
-  initializer = jax.nn.initializers.he_normal()
-  hd = 16
-  key = args.meme_key
-  params = [
-    initializer(jax.random.key(key), (2, hd), jnp.float32),
-    jax.random.normal(jax.random.key(key + 1), (hd,), jnp.float32),
-    initializer(jax.random.key(key + 2), (hd, 2), jnp.float32),
-  ]
-  def calc_xy(params):
-    return jax.nn.tanh(sph / jnp.array([TAU, TAU / 2]) @ params[0] + params[1]) @ params[2]
 
 def loss(params):
   xy = calc_xy(params)
@@ -203,7 +221,7 @@ for (opt_i, opt_name) in enumerate(opts):
       dt = time.time() - t
       if args.save_on_logs:
         xy = calc_xy(params)
-        plot_map(name, sph, xy, triangles, draw_lines=False, show=False, step=i)
+        plot_map(name, sph, xy, triangles, draw_lines=False, show=False, step=i, title='earth')
       tqdm.write(f'{i} {dt:.04f} {loss(params).item()}')
 
   for i in tqdm(range(start, end)):
@@ -225,9 +243,10 @@ print('saving...')
 serialization.save(name, sph, triangles, xy)
 
 print(f'xy stdev: {jnp.std(xy[:, 0])} {jnp.std(xy[:, 1])}')
-print('plotting...')
-os.makedirs(f'results/{name}', exist_ok=True)
-plot_map(name, sph, xy, triangles, draw_lines=args.draw_lines, show=args.show)
+if not args.no_plot:
+  print('plotting...')
+  os.makedirs(f'results/{name}', exist_ok=True)
+  plot_map(name, sph, xy, triangles, draw_lines=args.draw_lines, show=args.show, title='earth')
 
 tangent_vecs = calc_tangent_vecs(xy, triples)
 distortion = calc_distortion(inv_atlas, tangent_vecs)

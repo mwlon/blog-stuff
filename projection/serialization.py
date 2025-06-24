@@ -3,6 +3,7 @@ import os
 import numpy as np
 from dataclasses import dataclass
 import numpy as np
+from lattice import triples_for_triangles, Lattice
 
 def save(name, sph, triangles, xy):
   d = f'results/{name}'
@@ -23,6 +24,17 @@ class LoadedData:
   sph: np.ndarray
   triangles: np.ndarray
   xy: np.ndarray
+
+  def lattice(self) -> Lattice:
+    sph = self.sph
+    phi = sph[:, 0]
+    theta = sph[:, 1]
+    x = np.sin(phi) * np.cos(theta)
+    y = np.sin(phi) * np.sin(theta)
+    z = np.cos(phi)
+    euc = np.stack([x, y, z], axis=1)
+    triples = triples_for_triangles(self.triangles)
+    return Lattice(sph=sph, euc=euc, triangles=self.triangles, triples=triples)
   
 def load(name):
   d = f'results/{name}'
