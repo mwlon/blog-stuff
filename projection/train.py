@@ -33,10 +33,10 @@ parser.add_argument(
   help='number of lattice points around equator',
 )
 parser.add_argument(
-  '--key',
+  '--meme-key',
   type=int,
-  default=240,
-  help='number of lattice points around equator',
+  default=None,
+  help='key for meme random normal initialization',
 )
 parser.add_argument(
   '--area-loss-prop',
@@ -127,20 +127,24 @@ angle_weight = areas * angles * water_mult
 
 print('initializing...')
 triples = jnp.array(triples)
-initializer = jax.nn.initializers.he_normal()
-hd = 16
-key = args.key
-params = [
-  initializer(jax.random.key(key), (2, hd), jnp.float32),
-  jax.random.normal(jax.random.key(key + 1), (hd,), jnp.float32),
-  initializer(jax.random.key(key + 2), (hd, 2), jnp.float32),
-]
-#initial = args.initial.lower()
-#initial_projection = next(proj for proj in traditional.projections if proj.name.lower() == initial)
-#xy = traditional.calc_xy(initial_projection, sph)
 
-def calc_xy(params):
-  return jax.nn.tanh(sph / jnp.array([TAU, TAU / 2]) @ params[0] + params[1]) @ params[2]
+if args.meme_key is None:
+  initial = args.initial.lower()
+  initial_projection = next(proj for proj in traditional.projections if proj.name.lower() == initial)
+  params = traditional.calc_xy(initial_projection, sph)
+  def calc_xy(xy):
+    return xy
+else:
+  initializer = jax.nn.initializers.he_normal()
+  hd = 16
+  key = args.meme_key
+  params = [
+    initializer(jax.random.key(key), (2, hd), jnp.float32),
+    jax.random.normal(jax.random.key(key + 1), (hd,), jnp.float32),
+    initializer(jax.random.key(key + 2), (hd, 2), jnp.float32),
+  ]
+  def calc_xy(params):
+    return jax.nn.tanh(sph / jnp.array([TAU, TAU / 2]) @ params[0] + params[1]) @ params[2]
 
 def loss(params):
   xy = calc_xy(params)
@@ -170,6 +174,7 @@ for (opt_i, opt_name) in enumerate(opts):
     else:
       opt = optax.sgd(schedule)
    
+    @jit
     def update(params, opt_state):
       params_grad = grad(loss)(params)
       updates, opt_state = opt.update(params_grad, opt_state)
@@ -179,7 +184,7 @@ for (opt_i, opt_name) in enumerate(opts):
     opt_state = opt.init(params)
   elif opt_name == 'lbfgs':
     # jaxopt
-    opt = LBFGS(loss, jit=False, max_stepsize=args.base_lr)
+    opt = LBFGS(loss, jit=True, max_stepsize=args.base_lr)
 
     def update(params, opt_state):
       return opt.update(params, opt_state)
@@ -197,7 +202,8 @@ for (opt_i, opt_name) in enumerate(opts):
     if i % log_period == 0:
       dt = time.time() - t
       if args.save_on_logs:
-        plot_map(name, sph, calc_xy(params), triangles, draw_lines=False, show=False, step=i)
+        xy = calc_xy(params)
+        plot_map(name, sph, xy, triangles, draw_lines=False, show=False, step=i)
       tqdm.write(f'{i} {dt:.04f} {loss(params).item()}')
 
   for i in tqdm(range(start, end)):
@@ -207,8 +213,8 @@ for (opt_i, opt_name) in enumerate(opts):
   if end > start:
     maybe_log(end)
 
-# rotate so map is straight up
 xy = calc_xy(params)
+# rotate so map is straight up
 n_pole = np.mean(xy[sph[:, 1] == 0], axis=0)
 xy -= n_pole
 s_pole = np.mean(xy[sph[:, 1] == TAU / 2], axis=0)
