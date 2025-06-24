@@ -57,8 +57,14 @@ parser.add_argument(
 parser.add_argument(
   '--title',
   type=str,
+  default='earth',
+  help='title to write on the distortion plot and filename of a trained projection',
+)
+parser.add_argument(
+  '--source',
+  type=str,
   default=None,
-  help='title to write on the distortion plot of a trained projection',
+  help='reference equirectangular projection image to draw from',
 )
 
 args = parser.parse_args()
@@ -98,7 +104,7 @@ if args.trained is not None:
   xy = loaded.xy
   xy = rotate_(xy)
   triangles = loaded.triangles
-  plot_map(name, sph, xy, triangles, show=show, draw_lines=args.draw_lines, scale=args.scale)
+  plot_map(name, sph, xy, triangles, show=show, draw_lines=args.draw_lines, scale=args.scale, source=args.source, title=args.title)
 
   if args.distortion:
     euc = calc_euc(sph)

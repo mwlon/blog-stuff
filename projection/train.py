@@ -33,6 +33,12 @@ parser.add_argument(
   help='number of lattice points around equator',
 )
 parser.add_argument(
+  '--key',
+  type=int,
+  default=240,
+  help='number of lattice points around equator',
+)
+parser.add_argument(
   '--area-loss-prop',
   type=float,
   default=0.5,
@@ -121,12 +127,23 @@ angle_weight = areas * angles * water_mult
 
 print('initializing...')
 triples = jnp.array(triples)
-initial = args.initial.lower()
-initial_projection = next(proj for proj in traditional.projections if proj.name.lower() == initial)
-xy = traditional.calc_xy(initial_projection, sph)
+initializer = jax.nn.initializers.he_normal()
+hd = 16
+key = args.key
+params = [
+  initializer(jax.random.key(key), (2, hd), jnp.float32),
+  jax.random.normal(jax.random.key(key + 1), (hd,), jnp.float32),
+  initializer(jax.random.key(key + 2), (hd, 2), jnp.float32),
+]
+#initial = args.initial.lower()
+#initial_projection = next(proj for proj in traditional.projections if proj.name.lower() == initial)
+#xy = traditional.calc_xy(initial_projection, sph)
 
-@jit
-def loss(xy):
+def calc_xy(params):
+  return jax.nn.tanh(sph / jnp.array([TAU, TAU / 2]) @ params[0] + params[1]) @ params[2]
+
+def loss(params):
+  xy = calc_xy(params)
   tangent_vecs = calc_tangent_vecs(xy, triples)
   distortion = calc_distortion(inv_atlas, tangent_vecs)
   area_loss, angle_loss = area_angle_loss(distortion, area_weight, angle_weight)
@@ -153,22 +170,21 @@ for (opt_i, opt_name) in enumerate(opts):
     else:
       opt = optax.sgd(schedule)
    
-    @jit
-    def update(xy, opt_state):
-      xy_grad = grad(loss)(xy)
-      updates, opt_state = opt.update(xy_grad, opt_state)
-      xy = optax.apply_updates(xy, updates)
-      return xy, opt_state
+    def update(params, opt_state):
+      params_grad = grad(loss)(params)
+      updates, opt_state = opt.update(params_grad, opt_state)
+      params = optax.apply_updates(params, updates)
+      return params, opt_state
 
-    opt_state = opt.init(xy)
+    opt_state = opt.init(params)
   elif opt_name == 'lbfgs':
     # jaxopt
-    opt = LBFGS(loss, jit=True, max_stepsize=args.base_lr)
+    opt = LBFGS(loss, jit=False, max_stepsize=args.base_lr)
 
-    def update(xy, opt_state):
-      return opt.update(xy, opt_state)
+    def update(params, opt_state):
+      return opt.update(params, opt_state)
 
-    opt_state = opt.init_state(xy)
+    opt_state = opt.init_state(params)
   else:
     raise Exception('unknown optimizer')
   print(f'{opt_name}...')
@@ -181,17 +197,18 @@ for (opt_i, opt_name) in enumerate(opts):
     if i % log_period == 0:
       dt = time.time() - t
       if args.save_on_logs:
-        plot_map(name, sph, xy, triangles, draw_lines=False, show=False, step=i)
-      tqdm.write(f'{i} {dt:.04f} {loss(xy).item()}')
+        plot_map(name, sph, calc_xy(params), triangles, draw_lines=False, show=False, step=i)
+      tqdm.write(f'{i} {dt:.04f} {loss(params).item()}')
 
   for i in tqdm(range(start, end)):
     maybe_log(i)
-    xy, opt_state = update(xy, opt_state)
+    params, opt_state = update(params, opt_state)
 
   if end > start:
     maybe_log(end)
 
 # rotate so map is straight up
+xy = calc_xy(params)
 n_pole = np.mean(xy[sph[:, 1] == 0], axis=0)
 xy -= n_pole
 s_pole = np.mean(xy[sph[:, 1] == TAU / 2], axis=0)

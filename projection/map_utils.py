@@ -7,8 +7,6 @@ from matplotlib import tri
 from typing import Optional
 
 TAU = 2 * np.pi
-in_img = cv2.imread('land_shallow_topo_8192.tif')
-h, w, _ = in_img.shape
 
 def bbox(pts):
   j0 = int(np.min(pts[:, 0]))
@@ -28,7 +26,8 @@ def calc_out_xys(xy_pts, *, out_w, out_h, max_x, max_y):
   out_ys = out_h * (1 - xy_pts[:, 1] / max_y)
   return np.stack([out_xs, out_ys], axis=1)
 
-def fill_between(sph_pts, out_pts, *, out_img):
+def fill_between(sph_pts, out_pts, *, in_img, out_img):
+  h, w, _ = in_img.shape
   in_xs = sph_pts[:, 0] / TAU * w
   in_ys = sph_pts[:, 1] / (TAU / 2) * h
   in_pts = np.stack([in_xs, in_ys], axis=1)
@@ -45,6 +44,7 @@ def fill_between(sph_pts, out_pts, *, out_img):
    warp_mat, 
    (out_dw, out_dh), 
    borderMode=cv2.BORDER_REFLECT_101,
+   flags=cv2.INTER_NEAREST,
   )
 
   mask = np.zeros((out_dh, out_dw), dtype=np.float32)
@@ -99,11 +99,17 @@ def plot_map(
   sph_pts: np.ndarray,
   xy_pts: np.ndarray,
   triangles: np.ndarray,
+  title: str,
   show: bool = True,
   scale: int = 1024,
   draw_lines: bool = False,
   step: Optional[int] = None,
+  source: str | None = None,
 ):
+  if source is None:
+    source = 'land_shallow_topo_8192.tif'
+
+  in_img = cv2.imread(source)
   sph_pts = np.array(sph_pts)
   xy_pts = np.array(xy_pts)
   xy_pts -= np.min(xy_pts, axis=0)[None, :]
@@ -121,6 +127,7 @@ def plot_map(
       fill_between(
         sub_sph,
         sub_xy,
+        in_img=in_img,
         out_img=out_img,
       )
 
@@ -133,7 +140,7 @@ def plot_map(
         for j, k in [[0, 1], [1, 2], [2, 0]]:
           cv2.line(out_img, sub_xy[j], sub_xy[k], color=color)
   
-  fname = f'earth_{step:05d}.png' if step is not None else 'earth.png'
+  fname = f'{title}_{step:05d}.png' if step is not None else f'{title}.png'
   success = cv2.imwrite(f'results/{name}/{fname}', out_img)
   if not success:
     raise Exception('failed to save')
@@ -200,7 +207,10 @@ def plot_mults(
 def detect_water():
   earth = cv2.imread('land_shallow_topo_8192.tif')
   b, g, r = earth.transpose([2, 0, 1])
-  return (b > 50) & (g < 50) & (r < 50)
+  water_color = (b > 50) & (g < 50) & (r < 50)
+  plausible_position = np.ones_like(water_color)
+  plausible_position[-260:] = 0
+  return water_color & plausible_position
 
 def calc_water_prop(sph, triples):
   res = np.zeros(triples.shape[0])

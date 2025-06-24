@@ -1,5 +1,5 @@
 import numpy as np
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import dataclasses
 import pandas as pd
 
@@ -19,16 +19,15 @@ class Scenario:
   taxes: float = 0.0
   down_payment_ratio: float = 0.2
   mortgage_years: int = 30
-  mortgage_interest_rate: float = 0.06
+  mortgage_interest_rate: float = 0.056
   # with houseit or something the rebate might be up to 0.02 (2%)
   broker_rebate: float = 0.0
   utilities_if_condo: float = 600
 
   stock_return: float = 1.068
   real_estate_return: float = 1.055
-  federal_standard_deduction: float = 13850
-  state_standard_deduction: float = 8025
-  other_itemized_deduction: float = 5400
+  is_joint: bool = False
+  other_itemized_deduction: float = 5400 * 2
   # marginal tax rates
   federal_tax_rate: float = 0.37
   state_tax_rate: float = 0.0685 + 0.03876
@@ -75,7 +74,7 @@ class Result:
     pd.set_option('display.max_rows', 100)
     pd.set_option('display.max_columns', 10)
     pd.set_option('display.width', 300)
-    pd.set_option('display.float_format', '{:.0f}'.format)
+    pd.set_option('display.float_format', '{:,.0f}'.format)
 
     print('cash flows by year (raw):')
     df = pd.DataFrame(self.cash_flows.transpose(), columns=categories)
@@ -177,33 +176,40 @@ def calc(s):
   res[4, :s.years] = taxes
 
   # 5: TAX SAVINGS
-  deductible_mortgage_interest = s.mortgage_interest_rate * np.minimum(debt[:s.years], 750000)
-  itemized_deduction = s.other_itemized_deduction + deductible_mortgage_interest + np.minimum(taxes, 10000)
-  federal_incremental_deduction = np.maximum(itemized_deduction - s.federal_standard_deduction, 0)
-  state_incremental_deduction = np.maximum(itemized_deduction - s.state_standard_deduction, 0)
+  federal_standard_deduction: float = 13850
+  state_standard_deduction: float = 8025
+  max_mortgage_deduction = 375000
+  if s.is_joint:
+    federal_standard_deduction *= 2
+    state_standard_deduction *= 2
+    max_mortgage_deduction *= 2
+
+  deductible_mortgage_interest = s.mortgage_interest_rate * np.minimum(debt[:s.years], max_mortgage_deduction)
+  itemized_deduction = s.other_itemized_deduction + deductible_mortgage_interest #+ np.minimum(taxes, 10000)
+  federal_incremental_deduction = np.maximum(itemized_deduction - federal_standard_deduction, 0)
+  state_incremental_deduction = np.maximum(itemized_deduction - state_standard_deduction, 0)
   income_tax_savings = s.federal_tax_rate * federal_incremental_deduction + s.state_tax_rate * state_incremental_deduction
   res[5, :s.years] = -income_tax_savings
 
   return Result(res, s)
     
 
+base_scenario = Scenario(
+  "base",
+  is_coop=False,
+  price=1999000,
+  taxes=2172 * 12,
+  maintenance=1496 * 12,
+  years=15,
+  broker_rebate=0.02,
+  mortgage_interest_rate=0.06,
+)
 scenarios = [
-  Scenario(
-    "2M mortgage",
-    is_coop=False,
-    price=2000000 - 1,
-    taxes=20000,
-    maintenance=18000,
-    years=20,
-  ),
-  Scenario(
-    "2M cash",
-    is_coop=False,
-    price=2000000 - 1,
-    taxes=20000,
-    maintenance=18000,
-    down_payment_ratio=1.0,
-    years=20,
+  base_scenario,
+  replace(
+    base_scenario,
+    name="interest rates drop",
+    mortgage_interest_rate=0.04,
   ),
 ]
  

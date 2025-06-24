@@ -1,0 +1,10 @@
+optax
+jaxopt
+opencv-python
+numpy<2
+tabulate
+tqdm
+pcodec
+scipy
+etils
+importlib_resources
