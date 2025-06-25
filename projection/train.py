@@ -147,6 +147,7 @@ else:
   def calc_xy(params):
     return jax.nn.tanh(sph / jnp.array([TAU, TAU / 2]) @ params[0] + params[1]) @ params[2]
 
+print('precomputing quantities...')
 sph = lattice.sph
 euc = lattice.euc
 triples = lattice.triples
@@ -161,8 +162,7 @@ angle_weight = areas * angles * water_mult
 
 triples = jnp.array(triples)
 
-dumb_xy = calc_xy(params)
-orig_tangent_vecs = calc_tangent_vecs(dumb_xy, triples)
+orig_tangent_vecs = calc_tangent_vecs(calc_xy(params), triples)
 orig_distortion = calc_distortion(inv_atlas, orig_tangent_vecs)
 orig_distortion_dets = calc_distortion_dets(orig_distortion)
 orig_distortion_det_signs = orig_distortion_dets >= 0
