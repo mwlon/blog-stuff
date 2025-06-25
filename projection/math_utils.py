@@ -5,7 +5,6 @@ import numpy as np
 from jax import numpy as jnp
 import matplotlib as mpl
 import cv2
-mpl.use('macosx')
 from matplotlib import pyplot as plt
 from dataclasses import dataclass, field
 from datetime import datetime
