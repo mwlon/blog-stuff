@@ -212,19 +212,21 @@ def detect_water():
   plausible_position[-260:] = 0
   return water_color & plausible_position
 
-def calc_water_prop(sph, triples):
-  res = np.zeros(triples.shape[0])
+def calc_water_prop(sph, triangles):
+  res = np.zeros(triangles.shape[0])
   is_water = detect_water()
   h, w = is_water.shape
+  sphs = np.take(sph, triangles, axis=0)
+  in_xss = sphs[:, :, 0] / TAU * w
+  in_yss = sphs[:, :, 1] / (TAU / 2) * h
 
-  for i, idxs in enumerate(triples):
-    sub_sph = sph[idxs]
-    in_xs = sub_sph[:, 0] / TAU * w
-    in_ys = sub_sph[:, 1] / (TAU / 2) * h
-    in_pts = np.stack([in_xs, in_ys], axis=1)
+  in_ptss = np.stack([in_xss, in_yss], axis=-1)
+  n_triangles = triangles.shape[0]
 
+  for i in range(n_triangles):
+    in_pts = in_ptss[i]
     in_i0, in_i1, in_j0, in_j1, in_dh, in_dw = bbox(in_pts)
-    sub_image = is_water[in_i0:in_i1, in_j0:in_j1].copy()
+    sub_image = is_water[in_i0:in_i1, in_j0:in_j1]
     mask = np.zeros(sub_image.shape, dtype=np.float32)
     in_dpts = (in_pts - np.array([in_j0, in_i0])[None, :]).astype(np.int32)
     cv2.fillConvexPoly(mask, in_dpts, 1.0, shift=8)

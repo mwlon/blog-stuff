@@ -150,13 +150,15 @@ else:
 print('precomputing quantities...')
 sph = lattice.sph
 euc = lattice.euc
-triples = lattice.triples
 triangles = lattice.triangles
+triples = lattice.triples()
 n = sph.shape[0]
 
 areas, angles, uv_length, wv_length = calc_areas_angles_lengths(euc, triples)
 inv_atlas = calc_inv_atlas(angles, uv_length, wv_length)
-water_mult = 1 + (args.water_angle_loss_mult - 1) * calc_water_prop(sph, triples)
+triangle_water_mult = 1 + (args.water_angle_loss_mult - 1) * calc_water_prop(sph, triangles)
+water_mult = np.take(triangle_water_mult, lattice.triple_triangle_idxs())
+print(f'{triangle_water_mult.shape=} {water_mult.shape=}')
 area_weight = areas * angles
 angle_weight = areas * angles * water_mult
 
@@ -216,7 +218,7 @@ for (opt_i, opt_name) in enumerate(opts):
     raise Exception('unknown optimizer')
    
   @jax.jit
-  def update(params, opt_state):
+  def do_update(params, opt_state):
     loss_value, params_grad = jax.value_and_grad(loss)(params)
     updates, opt_state = opt.update(
       params_grad,
@@ -249,7 +251,7 @@ for (opt_i, opt_name) in enumerate(opts):
 
   for i in tqdm(range(start, end)):
     maybe_log(i)
-    params, opt_state, halvings = update(params, opt_state)
+    params, opt_state, halvings = do_update(params, opt_state)
     if halvings > 0:
       print(f'WARNING: halved update {halvings} times')
 

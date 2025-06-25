@@ -9,7 +9,14 @@ class Lattice:
   sph: np.array # n x 2
   euc: np.array # n x 3
   triangles: np.array # k x 3, int
-  triples: np.array # 3k x 3, int
+
+  def triples(self):
+    # 3k x 3, int
+    return triples_for_triangles(self.triangles)
+
+  def triple_triangle_idxs(self):
+    return np.tile(np.arange(self.triangles.shape[0]), 3)
+    
 
 @dataclass
 class RowSpec:
@@ -216,13 +223,11 @@ def build_lattice_more_interrupted(side_n, include_degenerate=False):
 
   euc = np.stack([x, y, z], axis=1)
   sph = np.stack([theta, phi], axis=1)
-  triples = triples_for_triangles(triangles)
 
   return Lattice(
     sph,
     euc,
     triangles,
-    triples,
   )
 
 def build_lattice_less_interrupted(side_n, include_degenerate=False):
@@ -282,11 +287,9 @@ def build_lattice_less_interrupted(side_n, include_degenerate=False):
 
   euc = np.stack([x, y, z], axis=1)
   sph = np.stack([theta, phi], axis=1)
-  triples = triples_for_triangles(triangles)
 
   return Lattice(
     sph,
     euc,
     triangles,
-    triples,
   )
