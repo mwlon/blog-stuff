@@ -5,7 +5,6 @@ from matplotlib import pyplot as plt
 import argparse
 import jax
 import optax
-from jax import jit, grad, vmap
 from map_utils import plot_map, plot_mults, calc_water_prop
 from lattice import build_lattice, triples_for_triangles
 from math_utils import arclength_between, plane_angle_between, calc_inv_atlas, calc_areas_angles_lengths, area_angle_loss, area_angle_multipliers, calc_tangent_vecs, calc_distortion, rotate, calc_distortion_dets
@@ -190,7 +189,7 @@ def halve_updates(params_updates_iter):
 def safely_apply_updates(params, updates):
   params, updates, i = jax.lax.while_loop(update_is_unsafe, halve_updates, (params, updates, 0))
 
-  result = params + 0.8 * updates
+  result = params + 0.9 * updates
   jax.lax.cond(
     i > 0,
     lambda i: jax.debug.print('WARNING: halved gradient {i} times', i=i),
@@ -222,10 +221,17 @@ for (opt_i, opt_name) in enumerate(opts):
   else:
     raise Exception('unknown optimizer')
    
-  @jit
+  @jax.jit
   def update(params, opt_state):
-    params_grad = grad(loss)(params)
-    updates, opt_state = opt.update(params_grad, opt_state, params=params)
+    loss_value, params_grad = jax.value_and_grad(loss)(params)
+    updates, opt_state = opt.update(
+      params_grad,
+      opt_state,
+      params=params,
+      value=loss_value,
+      grad=params_grad,
+      value_fn=loss,
+    )
     params = safely_apply_updates(params, updates)
     return params, opt_state
 
