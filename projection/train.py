@@ -190,13 +190,7 @@ def safely_apply_updates(params, updates):
   params, updates, i = jax.lax.while_loop(update_is_unsafe, halve_updates, (params, updates, 0))
 
   result = params + 0.9 * updates
-  jax.lax.cond(
-    i > 0,
-    lambda i: jax.debug.print('WARNING: halved gradient {i} times', i=i),
-    lambda i: None,
-    i,
-  )
-  return result
+  return result, i
 
 if args.schedule == 'cosine':
   schedule = optax.cosine_decay_schedule(args.base_lr, decay_steps=args.n_iters + 1, alpha = 0.01)
@@ -232,8 +226,8 @@ for (opt_i, opt_name) in enumerate(opts):
       grad=params_grad,
       value_fn=loss,
     )
-    params = safely_apply_updates(params, updates)
-    return params, opt_state
+    params, halvings = safely_apply_updates(params, updates)
+    return params, opt_state, halvings
 
   opt_state = opt.init(params)
   print(f'{opt_name}...')
@@ -255,7 +249,9 @@ for (opt_i, opt_name) in enumerate(opts):
 
   for i in tqdm(range(start, end)):
     maybe_log(i)
-    params, opt_state = update(params, opt_state)
+    params, opt_state, halvings = update(params, opt_state)
+    if halvings > 0:
+      print(f'WARNING: halved update {halvings} times')
 
   if end > start:
     maybe_log(end)
