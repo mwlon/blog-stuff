@@ -1,5 +1,5 @@
+jax
 optax
-jaxopt
 opencv-python
 numpy<2
 tabulate

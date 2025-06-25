@@ -121,4 +121,8 @@ def calc_euc(sph):
 def rotate(xy, rot):
   rot_mat = np.array([[np.cos(rot), -np.sin(rot)], [np.sin(rot), np.cos(rot)]])
   return (rot_mat @ xy.transpose()).transpose()
+
+def calc_distortion_dets(distortion):
+  assert len(distortion.shape) == 3
+  return distortion[:, 0, 0] * distortion[:, 1, 1] - distortion[:, 0, 1] * distortion[:, 1, 0]
   

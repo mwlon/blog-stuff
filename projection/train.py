@@ -8,10 +8,9 @@ import optax
 from jax import jit, grad, vmap
 from map_utils import plot_map, plot_mults, calc_water_prop
 from lattice import build_lattice, triples_for_triangles
-from math_utils import arclength_between, plane_angle_between, calc_inv_atlas, calc_areas_angles_lengths, area_angle_loss, area_angle_multipliers, calc_tangent_vecs, calc_distortion, rotate
+from math_utils import arclength_between, plane_angle_between, calc_inv_atlas, calc_areas_angles_lengths, area_angle_loss, area_angle_multipliers, calc_tangent_vecs, calc_distortion, rotate, calc_distortion_dets
 import time
 from tqdm import tqdm
-from jaxopt import LBFGS
 import traditional
 import warnings
 import os
@@ -127,7 +126,7 @@ if args.meme_key is None:
     initial_projection = next(proj for proj in traditional.projections if proj.name.lower() == initial)
     print('[traditional projection initialization] computing lattice...')
     lattice = build_lattice(args.side_n, more_interrupted=args.more_interrupted)
-    params = traditional.calc_xy(initial_projection, sph)
+    params = traditional.calc_xy(initial_projection, lattice.sph)
   except StopIteration:
     proj = serialization.load(initial)
     print('[pretrained projection initialization] reusing lattice...')
@@ -163,6 +162,11 @@ angle_weight = areas * angles * water_mult
 
 triples = jnp.array(triples)
 
+dumb_xy = calc_xy(params)
+orig_tangent_vecs = calc_tangent_vecs(dumb_xy, triples)
+orig_distortion = calc_distortion(inv_atlas, orig_tangent_vecs)
+orig_distortion_dets = calc_distortion_dets(orig_distortion)
+orig_distortion_det_signs = orig_distortion_dets >= 0
 
 def loss(params):
   xy = calc_xy(params)
@@ -170,6 +174,30 @@ def loss(params):
   distortion = calc_distortion(inv_atlas, tangent_vecs)
   area_loss, angle_loss = area_angle_loss(distortion, area_weight, angle_weight)
   return area_loss_prop * area_loss + (1 - area_loss_prop) * angle_loss
+
+def update_is_unsafe(params_updates_iter):
+  params, updates, i = params_updates_iter
+  xy = calc_xy(params + updates)
+  tangent_vecs = calc_tangent_vecs(xy, triples)
+  distortion = calc_distortion(inv_atlas, tangent_vecs)
+  distortion_det_signs = calc_distortion_dets(distortion) >= 0
+  return jnp.array(i < 10) & jnp.any(distortion_det_signs != orig_distortion_det_signs)
+
+def halve_updates(params_updates_iter):
+  params, updates, i = params_updates_iter
+  return params, updates / 2.0, i + 1
+
+def safely_apply_updates(params, updates):
+  params, updates, i = jax.lax.while_loop(update_is_unsafe, halve_updates, (params, updates, 0))
+
+  result = params + 0.8 * updates
+  jax.lax.cond(
+    i > 0,
+    lambda i: jax.debug.print('WARNING: halved gradient {i} times', i=i),
+    lambda i: None,
+    i,
+  )
+  return result
 
 if args.schedule == 'cosine':
   schedule = optax.cosine_decay_schedule(args.base_lr, decay_steps=args.n_iters + 1, alpha = 0.01)
@@ -185,31 +213,23 @@ opts = args.opts.split(',')
 n_opts = len(opts)
 log_period = args.log_period
 for (opt_i, opt_name) in enumerate(opts):
-  if opt_name in ['adam', 'sgd']:
-    # optax
-    if opt_name == 'adam':
-      opt = optax.adam(schedule, b2=0.99)
-    else:
-      opt = optax.sgd(schedule)
-   
-    @jit
-    def update(params, opt_state):
-      params_grad = grad(loss)(params)
-      updates, opt_state = opt.update(params_grad, opt_state)
-      params = optax.apply_updates(params, updates)
-      return params, opt_state
-
-    opt_state = opt.init(params)
+  if opt_name == 'adam':
+    opt = optax.adam(schedule, b2=0.99)
   elif opt_name == 'lbfgs':
-    # jaxopt
-    opt = LBFGS(loss, jit=True, max_stepsize=args.base_lr)
-
-    def update(params, opt_state):
-      return opt.update(params, opt_state)
-
-    opt_state = opt.init_state(params)
+    opt = optax.lbfgs(schedule)
+  elif opt_name == 'sgd':
+    opt = optax.sgd(schedule)
   else:
     raise Exception('unknown optimizer')
+   
+  @jit
+  def update(params, opt_state):
+    params_grad = grad(loss)(params)
+    updates, opt_state = opt.update(params_grad, opt_state, params=params)
+    params = safely_apply_updates(params, updates)
+    return params, opt_state
+
+  opt_state = opt.init(params)
   print(f'{opt_name}...')
   
   start = (n_iters * opt_i) // n_opts
@@ -222,7 +242,10 @@ for (opt_i, opt_name) in enumerate(opts):
       if args.save_on_logs:
         xy = calc_xy(params)
         plot_map(name, sph, xy, triangles, draw_lines=False, show=False, step=i, title='earth')
-      tqdm.write(f'{i} {dt:.04f} {loss(params).item()}')
+      loss_float = loss(params).item()
+      if not jnp.isfinite(loss_float):
+        raise Exception('loss became nan!')
+      tqdm.write(f'{i} {dt:.04f} {loss_float}')
 
   for i in tqdm(range(start, end)):
     maybe_log(i)
