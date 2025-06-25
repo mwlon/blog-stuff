@@ -27,8 +27,8 @@ class LoadedData:
 
   def lattice(self) -> Lattice:
     sph = self.sph
-    phi = sph[:, 0]
-    theta = sph[:, 1]
+    theta = sph[:, 0]
+    phi = sph[:, 1]
     x = np.sin(phi) * np.cos(theta)
     y = np.sin(phi) * np.sin(theta)
     z = np.cos(phi)

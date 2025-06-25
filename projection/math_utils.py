@@ -18,7 +18,7 @@ import re
 TAU = 2 * jnp.pi
 
 def normalized(v):
-  return v / (np.linalg.norm(v, axis=1))[:, None]
+  return v / np.linalg.norm(v, axis=1)[:, None]
 
 def plane_angle_between(u, v):
   dot = np.sum(normalized(u) * normalized(v), axis=1)
