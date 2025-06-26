@@ -167,7 +167,6 @@ areas, angles, uv_length, wv_length = calc_areas_angles_lengths(euc, triples)
 inv_atlas = calc_inv_atlas(angles, uv_length, wv_length)
 triangle_water_mult = 1 + (args.water_angle_loss_mult - 1) * calc_water_prop(sph, triangles)
 water_mult = np.take(triangle_water_mult, lattice.triple_triangle_idxs())
-print(f'{triangle_water_mult.shape=} {water_mult.shape=}')
 area_weight = areas * angles
 angle_weight = areas * angles * water_mult
 
@@ -285,7 +284,7 @@ for i in tqdm(range(n_iters)):
     print(f'Enabling unsafe updates! The last {consecutive_whole} updates where whole')
     safe = False
 
-maybe_log(end)
+maybe_log(n_iters)
 
 xy = calc_xy(params)
 # rotate so map is straight up
