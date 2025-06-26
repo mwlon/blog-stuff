@@ -20,16 +20,15 @@ import shutil
 TAU = 2 * jnp.pi
 # after this many consecutive safe updates that didn't require halvings, turn
 # on unsafe ones
-ENABLE_UNSAFE_THRESH = 25
 
-cache_path = "/tmp/jax_cache"
+#cache_path = "/tmp/jax_cache"
 #if Path(cache_path).exists():
 #  shutil.rmtree(cache_path)
 #jax.clear_caches()
-jax.config.update("jax_compilation_cache_dir", cache_path)
-jax.config.update("jax_persistent_cache_min_entry_size_bytes", -1)
-jax.config.update("jax_persistent_cache_min_compile_time_secs", 0)
-jax.config.update("jax_persistent_cache_enable_xla_caches", "xla_gpu_per_fusion_autotune_cache_dir")
+#jax.config.update("jax_compilation_cache_dir", cache_path)
+#jax.config.update("jax_persistent_cache_min_entry_size_bytes", -1)
+#jax.config.update("jax_persistent_cache_min_compile_time_secs", 0)
+#jax.config.update("jax_persistent_cache_enable_xla_caches", "xla_gpu_per_fusion_autotune_cache_dir")
 
 parser = argparse.ArgumentParser()
 parser.add_argument(
@@ -80,11 +79,6 @@ parser.add_argument(
   help='whether to show or not',
 )
 parser.add_argument(
-  '--draw-lines',
-  action='store_true',
-  help='whether to overlay triangles on map',
-)
-parser.add_argument(
   '--log-period',
   type=int,
   default=100,
@@ -105,7 +99,7 @@ parser.add_argument(
   '--initial',
   type=str,
   default='natural earth',
-  help='initial conditions for map projections',
+  help='initial condition; another traditional or trained map projection',
 )
 parser.add_argument(
   '--water-angle-loss-mult',
@@ -120,6 +114,12 @@ parser.add_argument(
 parser.add_argument(
   '--plot',
   action='store_true',
+)
+parser.add_argument(
+  '--unsafe-update-thresh',
+  type=int,
+  default=25,
+  help='after how many un-halved safe updates to start doing faster unsafe updates',
 )
 
 args = parser.parse_args()
@@ -280,7 +280,7 @@ for i in tqdm(range(n_iters)):
     consecutive_whole = 0
   else:
     consecutive_whole += 1
-  if safe and consecutive_whole >= ENABLE_UNSAFE_THRESH:
+  if safe and consecutive_whole >= args.unsafe_update_thresh:
     print(f'Enabling unsafe updates! The last {consecutive_whole} updates where whole')
     safe = False
 
@@ -292,6 +292,7 @@ n_pole = np.mean(xy[sph[:, 1] == 0], axis=0)
 xy -= n_pole
 s_pole = np.mean(xy[sph[:, 1] == TAU / 2], axis=0)
 rot = -(TAU / 4 + np.arctan2(s_pole[1], s_pole[0]))
+print(f'shifting by {n_pole}, rotating by {rot}...')
 xy = rotate(xy, rot)
 
 print('saving...')
@@ -301,7 +302,7 @@ print(f'xy stdev: {jnp.std(xy[:, 0])} {jnp.std(xy[:, 1])}')
 if args.plot or args.show:
   print('plotting...')
   os.makedirs(f'results/{name}', exist_ok=True)
-  plot_map(name, sph, xy, triangles, draw_lines=args.draw_lines, show=args.show, title='earth')
+  plot_map(name, sph, xy, triangles, show=args.show, title='earth')
 
 tangent_vecs = calc_tangent_vecs(xy, triples)
 distortion = calc_distortion(inv_atlas, tangent_vecs)
