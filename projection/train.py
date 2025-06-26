@@ -270,6 +270,10 @@ def maybe_log(i):
 consecutive_whole = 0
 safe = True
 for i in tqdm(range(n_iters)):
+  if safe and consecutive_whole >= args.unsafe_update_thresh:
+    print(f'Enabling unsafe updates! The last {consecutive_whole} updates where whole')
+    safe = False
+
   maybe_log(i)
   if safe:
     params, opt_state, halvings = safely_update(params, opt_state)
@@ -280,9 +284,6 @@ for i in tqdm(range(n_iters)):
     consecutive_whole = 0
   else:
     consecutive_whole += 1
-  if safe and consecutive_whole >= args.unsafe_update_thresh:
-    print(f'Enabling unsafe updates! The last {consecutive_whole} updates where whole')
-    safe = False
 
 maybe_log(n_iters)
 
