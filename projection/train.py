@@ -18,6 +18,9 @@ from pathlib import Path
 import shutil
 
 TAU = 2 * jnp.pi
+# after this many consecutive safe updates that didn't require halvings, turn
+# on unsafe ones
+ENABLE_UNSAFE_THRESH = 25
 
 cache_path = "/tmp/jax_cache"
 #if Path(cache_path).exists():
@@ -60,10 +63,10 @@ parser.add_argument(
   help='base learning rate for Adam or SGD; or max step size for LBFGS',
 )
 parser.add_argument(
-  '--opts',
+  '--opt',
   type=str,
   default='lbfgs',
-  help='optimizers to use',
+  help='optimizer to use',
 )
 parser.add_argument(
   '--name',
@@ -88,7 +91,7 @@ parser.add_argument(
   help='log loss every this many iterations',
 )
 parser.add_argument(
-  '--save-on-logs',
+  '--plot-on-logs',
   action='store_true',
   help='save every time we log loss instead of only at the end',
 )
@@ -115,7 +118,7 @@ parser.add_argument(
   action='store_true',
 )
 parser.add_argument(
-  '--no-plot',
+  '--plot',
   action='store_true',
 )
 
@@ -201,7 +204,7 @@ def safely_apply_updates(params, updates):
   return result, halvings
 
 if args.schedule == 'cosine':
-  schedule = optax.cosine_decay_schedule(args.base_lr, decay_steps=args.n_iters + 1, alpha = 0.01)
+  schedule = optax.cosine_decay_schedule(args.base_lr, decay_steps=n_iters + 1, alpha = 0.01)
 elif args.schedule == 'const':
   schedule = args.base_lr
 elif args.schedule == 'ramp':
@@ -210,59 +213,79 @@ else:
   raise Exception('unknown learning rate schedule')
 
 print('training...')
-opts = args.opts.split(',')
-n_opts = len(opts)
+opt_name = args.opt
 log_period = args.log_period
-for (opt_i, opt_name) in enumerate(opts):
-  if opt_name == 'adam':
-    opt = optax.adam(schedule, b2=0.99)
-  elif opt_name == 'lbfgs':
-    opt = optax.lbfgs(schedule)
-  elif opt_name == 'sgd':
-    opt = optax.sgd(schedule)
-  else:
-    raise Exception('unknown optimizer')
+
+if opt_name == 'adam':
+  opt = optax.adam(schedule, b2=0.99)
+elif opt_name == 'lbfgs':
+  opt = optax.lbfgs(schedule)
+elif opt_name == 'sgd':
+  opt = optax.sgd(schedule)
+else:
+  raise Exception('unknown optimizer')
    
-  @jax.jit
-  def do_update(params, opt_state):
-    loss_value, params_grad = jax.value_and_grad(loss)(params)
-    updates, opt_state = opt.update(
-      params_grad,
-      opt_state,
-      params=params,
-      value=loss_value,
-      grad=params_grad,
-      value_fn=loss,
-    )
-    params, halvings = safely_apply_updates(params, updates)
-    return params, opt_state, halvings
+@jax.jit
+def safely_update(params, opt_state):
+  loss_value, params_grad = jax.value_and_grad(loss)(params)
+  updates, opt_state = opt.update(
+    params_grad,
+    opt_state,
+    params=params,
+    value=loss_value,
+    grad=params_grad,
+    value_fn=loss,
+  )
+  params, halvings = safely_apply_updates(params, updates)
+  return params, opt_state, halvings
 
-  opt_state = opt.init(params)
-  print(f'{opt_name}...')
-  
-  start = (n_iters * opt_i) // n_opts
-  end = (n_iters * (opt_i + 1)) // n_opts
+@jax.jit
+def unsafely_update(params, opt_state):
+  loss_value, params_grad = jax.value_and_grad(loss)(params)
+  updates, opt_state = opt.update(
+    params_grad,
+    opt_state,
+    params=params,
+    value=loss_value,
+    grad=params_grad,
+    value_fn=loss,
+  )
+  params = optax.apply_updates(params, updates)
+  return params, opt_state, 0
 
-  t = time.time()
-  def maybe_log(i):
-    if i % log_period == 0:
-      dt = time.time() - t
-      if args.save_on_logs:
-        xy = calc_xy(params)
-        plot_map(name, sph, xy, triangles, draw_lines=False, show=False, step=i, title='earth')
-      loss_float = loss(params).item()
-      if not jnp.isfinite(loss_float):
-        raise Exception('loss became nan!')
-      tqdm.write(f'{i} {dt:.04f} {loss_float}')
+opt_state = opt.init(params)
+print(f'{opt_name}...')
 
-  for i in tqdm(range(start, end)):
-    maybe_log(i)
-    params, opt_state, halvings = do_update(params, opt_state)
-    if halvings > 0:
-      print(f'WARNING: halved update {halvings} times')
+t = time.time()
+def maybe_log(i):
+  if i % log_period == 0:
+    dt = time.time() - t
+    if args.plot_on_logs:
+      xy = calc_xy(params)
+      plot_map(name, sph, xy, triangles, draw_lines=False, show=False, step=i, title='earth')
+    loss_float = loss(params).item()
+    if not jnp.isfinite(loss_float):
+      raise Exception('loss became nan!')
+    tqdm.write(f'{i} {dt:.04f} {loss_float}')
 
-  if end > start:
-    maybe_log(end)
+consecutive_whole = 0
+safe = True
+for i in tqdm(range(n_iters)):
+  maybe_log(i)
+  if safe:
+    params, opt_state, halvings = safely_update(params, opt_state)
+  else:
+    params, opt_state, halvings = unsafely_update(params, opt_state)
+  if halvings > 0:
+    print(f'WARNING: halved update {halvings} times')
+    consecutive_whole = 0
+  else:
+    consecutive_whole += 1
+  if safe and consecutive_whole >= ENABLE_UNSAFE_THRESH:
+    print(f'Enabling unsafe updates! The last {consecutive_whole} updates where whole')
+    safe = False
+
+maybe_log(end)
 
 xy = calc_xy(params)
 # rotate so map is straight up
@@ -276,7 +299,7 @@ print('saving...')
 serialization.save(name, sph, triangles, xy)
 
 print(f'xy stdev: {jnp.std(xy[:, 0])} {jnp.std(xy[:, 1])}')
-if not args.no_plot:
+if args.plot or args.show:
   print('plotting...')
   os.makedirs(f'results/{name}', exist_ok=True)
   plot_map(name, sph, xy, triangles, draw_lines=args.draw_lines, show=args.show, title='earth')

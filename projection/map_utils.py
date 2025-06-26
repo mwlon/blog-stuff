@@ -216,6 +216,7 @@ def detect_water():
   b, g, r = earth.transpose([2, 0, 1])
   water_color = (b > 50) & (g < 50) & (r < 50)
   plausible_position = np.ones_like(water_color)
+  # parts of antarctica look like water, so we hack some of them to be land
   plausible_position[-260:] = 0
   return water_color & plausible_position
 
