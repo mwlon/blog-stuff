@@ -14,10 +14,16 @@ import traditional
 import warnings
 import os
 import serialization
+from pathlib import Path
+import shutil
 
 TAU = 2 * jnp.pi
 
-jax.config.update("jax_compilation_cache_dir", "/tmp/jax_cache")
+cache_path = "/tmp/jax_cache"
+#if Path(cache_path).exists():
+#  shutil.rmtree(cache_path)
+#jax.clear_caches()
+jax.config.update("jax_compilation_cache_dir", cache_path)
 jax.config.update("jax_persistent_cache_min_entry_size_bytes", -1)
 jax.config.update("jax_persistent_cache_min_compile_time_secs", 0)
 jax.config.update("jax_persistent_cache_enable_xla_caches", "xla_gpu_per_fusion_autotune_cache_dir")
@@ -189,10 +195,10 @@ def halve_updates(params_updates_iter):
   return params, updates / 2.0, i + 1
 
 def safely_apply_updates(params, updates):
-  params, updates, i = jax.lax.while_loop(update_is_unsafe, halve_updates, (params, updates, 0))
+  params, updates, halvings = jax.lax.while_loop(update_is_unsafe, halve_updates, (params, updates, 0))
 
   result = params + 0.9 * updates
-  return result, i
+  return result, halvings
 
 if args.schedule == 'cosine':
   schedule = optax.cosine_decay_schedule(args.base_lr, decay_steps=args.n_iters + 1, alpha = 0.01)

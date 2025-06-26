@@ -8,12 +8,19 @@ from typing import Optional
 
 TAU = 2 * np.pi
 
-def bbox(pts):
-  j0 = int(np.min(pts[:, 0]))
-  j1 = int(np.max(np.ceil(pts[:, 0])))
-  i0 = int(np.min(pts[:, 1]))
-  i1 = int(np.max(np.ceil(pts[:, 1])))
-  return i0, i1, j0, j1, i1 - i0, j1 - j0
+def bbox(ptss):
+  j0 = np.min(ptss[:, :, 0], axis=1)
+  j1 = np.max(np.ceil(ptss[:, :, 0]), axis=1))
+  i0 = np.min(ptss[:, :, 1], axis=1)
+  i1 = np.max(np.ceil(ptss[:, :, 1]), axis=1))
+  return np.stack([
+    i0,
+    i1,
+    j0,
+    j1,
+    i1 - i0,
+    j1 - j0,
+  ], axis=-1)
 
 def out_sizes(max_x, max_y, scale):
   area = max_x * max_y
@@ -222,10 +229,10 @@ def calc_water_prop(sph, triangles):
 
   in_ptss = np.stack([in_xss, in_yss], axis=-1)
   n_triangles = triangles.shape[0]
+  in_i01j01dhdw = bbox(in_ptss)
 
   for i in range(n_triangles):
-    in_pts = in_ptss[i]
-    in_i0, in_i1, in_j0, in_j1, in_dh, in_dw = bbox(in_pts)
+    in_i0, in_i1, in_j0, in_j1, in_dh, in_dw = in_i01j01dhdw[i]
     sub_image = is_water[in_i0:in_i1, in_j0:in_j1]
     mask = np.zeros(sub_image.shape, dtype=np.float32)
     in_dpts = (in_pts - np.array([in_j0, in_i0])[None, :]).astype(np.int32)

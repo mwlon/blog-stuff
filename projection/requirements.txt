@@ -1,3 +1,4 @@
+jax>=0.6
 optax
 opencv-python
 numpy<2
