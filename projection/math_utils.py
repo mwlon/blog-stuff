@@ -118,8 +118,10 @@ def calc_euc(sph):
   return np.stack([x, y, z], axis=1)
 
 def rotate(xy, rot):
-  rot_mat = np.array([[np.cos(rot), -np.sin(rot)], [np.sin(rot), np.cos(rot)]])
-  return (rot_mat @ xy.transpose()).transpose()
+  # without highest matmul precision, we can easily get nan loss on CUDA
+  jax.config.update("jax_default_matmul_precision", "highest")
+  rot_mat = jnp.array([[np.cos(rot), np.sin(rot)], [-np.sin(rot), np.cos(rot)]])
+  return xy @ rot_mat
 
 def calc_distortion_dets(distortion):
   assert len(distortion.shape) == 3
