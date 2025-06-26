@@ -27,7 +27,7 @@ class LoadedData:
   xy: np.ndarray
 
   def lattice(self) -> Lattice:
-    euc = math_utils.calc_euc(sph)
+    euc = math_utils.calc_euc(self.sph)
     return Lattice(sph=sph, euc=euc, triangles=self.triangles)
   
 def load(name):
