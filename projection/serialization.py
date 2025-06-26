@@ -28,7 +28,7 @@ class LoadedData:
 
   def lattice(self) -> Lattice:
     euc = math_utils.calc_euc(self.sph)
-    return Lattice(sph=sph, euc=euc, triangles=self.triangles)
+    return Lattice(sph=self.sph, euc=euc, triangles=self.triangles)
   
 def load(name):
   d = f'results/{name}'
