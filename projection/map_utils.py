@@ -9,10 +9,10 @@ from typing import Optional
 TAU = 2 * np.pi
 
 def bbox(ptss):
-  j0 = np.min(ptss[:, :, 0], axis=1)
-  j1 = np.max(np.ceil(ptss[:, :, 0]), axis=1))
-  i0 = np.min(ptss[:, :, 1], axis=1)
-  i1 = np.max(np.ceil(ptss[:, :, 1]), axis=1))
+  j0 = np.min(ptss[:, :, 0], axis=1).astype(np.int32)
+  j1 = np.max(np.ceil(ptss[:, :, 0]), axis=1).astype(np.int32)
+  i0 = np.min(ptss[:, :, 1], axis=1).astype(np.int32)
+  i1 = np.max(np.ceil(ptss[:, :, 1]), axis=1).astype(np.int32)
   return np.stack([
     i0,
     i1,
@@ -232,6 +232,7 @@ def calc_water_prop(sph, triangles):
   in_i01j01dhdw = bbox(in_ptss)
 
   for i in range(n_triangles):
+    in_pts = in_ptss[i]
     in_i0, in_i1, in_j0, in_j1, in_dh, in_dw = in_i01j01dhdw[i]
     sub_image = is_water[in_i0:in_i1, in_j0:in_j1]
     mask = np.zeros(sub_image.shape, dtype=np.float32)
