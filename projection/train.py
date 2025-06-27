@@ -277,7 +277,7 @@ def save():
   xy -= n_pole
   s_pole = np.mean(xy[sph[:, 1] == TAU / 2], axis=0)
   rot = -(TAU / 4 + np.arctan2(s_pole[1], s_pole[0]))
-  print(f'saving [shift={n_pole}, rotation={rot}]...')
+  tqdm.write(f'saving [shift={n_pole}, rotation={rot}]...')
   xy = rotate(xy, rot)
   serialization.save(name, sph, triangles, xy)
 
@@ -286,7 +286,7 @@ consecutive_whole = 0
 safe = True
 for i in tqdm(range(n_iters)):
   if safe and consecutive_whole >= args.unsafe_update_thresh:
-    print(f'Enabling unsafe updates! The last {consecutive_whole} updates where whole')
+    tqdm.write(f'Enabling unsafe updates! The last {consecutive_whole} updates where whole')
     safe = False
 
   maybe_log(i)
@@ -295,7 +295,7 @@ for i in tqdm(range(n_iters)):
   else:
     params, opt_state, halvings = unsafely_update(params, opt_state)
   if halvings > 0:
-    print(f'WARNING: halved update {halvings} times')
+    tqdm.write(f'WARNING: halved update {halvings} times')
     consecutive_whole = 0
   else:
     consecutive_whole += 1
