@@ -189,7 +189,7 @@ def loss(params):
 
 def update_is_unsafe(params_updates_iter):
   params, updates, i = params_updates_iter
-  xy = calc_xy(params + updates)
+  xy = calc_xy(params + 1.3 * updates)
   tangent_vecs = calc_tangent_vecs(xy, triples)
   distortion = calc_distortion(inv_atlas, tangent_vecs)
   distortion_det_signs = calc_distortion_dets(distortion) >= 0
@@ -202,7 +202,7 @@ def halve_updates(params_updates_iter):
 def safely_apply_updates(params, updates):
   params, updates, halvings = jax.lax.while_loop(update_is_unsafe, halve_updates, (params, updates, 0))
 
-  result = params + 0.7 * updates
+  result = params + updates
   return result, halvings
 
 if args.schedule == 'cosine':
