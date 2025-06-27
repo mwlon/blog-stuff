@@ -26,6 +26,6 @@ for p in 001 003 010 030 100 200 300 400 500 600 700 800 900 970 990 997 999; do
     --n-iters $iters \
     --name Martin_$p \
     --area-loss-prop 0.$p \
-    --opts $opt \
+    --opt $opt \
     --base-lr $lr
 done

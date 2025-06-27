@@ -202,7 +202,7 @@ def halve_updates(params_updates_iter):
 def safely_apply_updates(params, updates):
   params, updates, halvings = jax.lax.while_loop(update_is_unsafe, halve_updates, (params, updates, 0))
 
-  result = params + 0.9 * updates
+  result = params + 0.7 * updates
   return result, halvings
 
 if args.schedule == 'cosine':
@@ -280,6 +280,7 @@ def save():
   tqdm.write(f'saving [shift={n_pole}, rotation={rot}]...')
   xy = rotate(xy, rot)
   serialization.save(name, sph, triangles, xy)
+  return xy
 
 
 consecutive_whole = 0
@@ -305,7 +306,7 @@ for i in tqdm(range(n_iters)):
 
 
 maybe_log(n_iters)
-save()
+xy = save()
 
 print(f'xy stdev: {jnp.std(xy[:, 0])} {jnp.std(xy[:, 1])}')
 if args.show:
