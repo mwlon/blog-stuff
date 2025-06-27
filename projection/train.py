@@ -112,13 +112,9 @@ parser.add_argument(
   action='store_true',
 )
 parser.add_argument(
-  '--plot',
-  action='store_true',
-)
-parser.add_argument(
   '--unsafe-update-thresh',
   type=int,
-  default=25,
+  default=100,
   help='after how many un-halved safe updates to start doing faster unsafe updates',
 )
 
@@ -165,10 +161,11 @@ n = sph.shape[0]
 
 areas, angles, uv_length, wv_length = calc_areas_angles_lengths(euc, triples)
 inv_atlas = calc_inv_atlas(angles, uv_length, wv_length)
-triangle_water_mult = 1 + (args.water_angle_loss_mult - 1) * calc_water_prop(sph, triangles)
-water_mult = np.take(triangle_water_mult, lattice.triple_triangle_idxs())
+water_prop = calc_water_prop(sph, triangles)
+triangle_terrain_mult = (1 - water_prop) + args.water_angle_loss_mult * water_weight
+terrain_mult = np.take(triangle_terrain_mult, lattice.triple_triangle_idxs())
 area_weight = areas * angles
-angle_weight = areas * angles * water_mult
+angle_weight = areas * angles * terrain_mult
 
 triples = jnp.array(triples)
 
@@ -211,8 +208,8 @@ elif args.schedule == 'ramp':
 else:
   raise Exception('unknown learning rate schedule')
 
-print('training...')
 opt_name = args.opt
+print(f'training with {opt_name}...')
 log_period = args.log_period
 
 if opt_name == 'adam':
@@ -300,7 +297,7 @@ print('saving...')
 serialization.save(name, sph, triangles, xy)
 
 print(f'xy stdev: {jnp.std(xy[:, 0])} {jnp.std(xy[:, 1])}')
-if args.plot or args.show:
+if args.show:
   print('plotting...')
   os.makedirs(f'results/{name}', exist_ok=True)
   plot_map(name, sph, xy, triangles, show=args.show, title='earth')

@@ -9,10 +9,10 @@ from typing import Optional
 TAU = 2 * np.pi
 
 def bbox(ptss):
-  j0 = np.min(ptss[:, :, 0], axis=1).astype(np.int32)
-  j1 = np.max(np.ceil(ptss[:, :, 0]), axis=1).astype(np.int32)
-  i0 = np.min(ptss[:, :, 1], axis=1).astype(np.int32)
-  i1 = np.max(np.ceil(ptss[:, :, 1]), axis=1).astype(np.int32)
+  j0 = np.min(ptss[..., 0], axis=-1).astype(np.int32)
+  j1 = np.max(np.ceil(ptss[..., 0]), axis=-1).astype(np.int32)
+  i0 = np.min(ptss[..., 1], axis=-1).astype(np.int32)
+  i1 = np.max(np.ceil(ptss[..., 1]), axis=-1).astype(np.int32)
   return np.stack([
     i0,
     i1,
@@ -32,6 +32,19 @@ def calc_out_xys(xy_pts, *, out_w, out_h, max_x, max_y):
   out_xs = out_w * (xy_pts[:, 0] / max_x)
   out_ys = out_h * (1 - xy_pts[:, 1] / max_y)
   return np.stack([out_xs, out_ys], axis=1)
+
+def fill_value_between(sph_pts, out_pts, *, in_value, out_img):
+  out_i0, out_i1, out_j0, out_j1, out_dh, out_dw = bbox(out_pts)
+  out_dpts = np.float32(out_pts - np.array([out_j0, out_i0])[None, :])
+
+  mask = np.zeros((out_dh, out_dw), dtype=np.float32)
+  out_dpts_i32 = (out_dpts * 256).astype(np.int32)
+  cv2.fillConvexPoly(mask, out_dpts_i32, 1.0, shift=8)
+  
+  out_img_slice = out_img[out_i0:out_i1, out_j0:out_j1]
+  sub = in_value - out_img_slice
+  delta = mask[:, :, None].astype(np.uint8) * sub
+  out_img_slice += delta
 
 def fill_between(sph_pts, out_pts, *, in_img, out_img):
   h, w, _ = in_img.shape
@@ -221,7 +234,7 @@ def detect_water():
   return water_color & plausible_position
 
 def calc_water_prop(sph, triangles):
-  res = np.zeros(triangles.shape[0])
+  res = np.zeros(triangles.shape[0], dtype=np.float32)
   is_water = detect_water()
   h, w = is_water.shape
   sphs = np.take(sph, triangles, axis=0)
@@ -238,7 +251,7 @@ def calc_water_prop(sph, triangles):
     sub_image = is_water[in_i0:in_i1, in_j0:in_j1]
     mask = np.zeros(sub_image.shape, dtype=np.float32)
     in_dpts = (in_pts - np.array([in_j0, in_i0])[None, :]).astype(np.int32)
-    cv2.fillConvexPoly(mask, in_dpts, 1.0, shift=8)
+    cv2.fillConvexPoly(mask, in_dpts, color=1.0)
     res[i] = np.sum(mask * sub_image) / np.sum(mask)
     
   return res
