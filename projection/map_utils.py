@@ -5,6 +5,7 @@ from matplotlib import pyplot as plt
 from datetime import datetime
 from matplotlib import tri
 from typing import Optional
+import os
 
 TAU = 2 * np.pi
 
@@ -161,7 +162,9 @@ def plot_map(
           cv2.line(out_img, sub_xy[j], sub_xy[k], color=color)
   
   fname = f'{title}_{step:05d}.png' if step is not None else f'{title}.png'
-  success = cv2.imwrite(f'results/{name}/{fname}', out_img)
+  dir_ = f'results/{name}'
+  os.makedirs(dir_, exist_ok=True)
+  success = cv2.imwrite(f'{dir_}/{fname}', out_img)
   if not success:
     raise Exception('failed to save')
   if show:

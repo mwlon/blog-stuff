@@ -90,6 +90,12 @@ parser.add_argument(
   help='save every time we log loss instead of only at the end',
 )
 parser.add_argument(
+  '--save-period',
+  type=int,
+  default=5000,
+  help='save the map projection every n iterations',
+)
+parser.add_argument(
   '--schedule',
   type=str,
   default='const',
@@ -202,7 +208,7 @@ def safely_apply_updates(params, updates):
 if args.schedule == 'cosine':
   schedule = optax.cosine_decay_schedule(args.base_lr, decay_steps=n_iters + 1, alpha = 0.01)
 elif args.schedule == 'const':
-  schedule = args.base_lr
+  schedule = optax.constant_schedule(args.base_lr)
 elif args.schedule == 'ramp':
   schedule = optax.linear_schedule(args.base_lr, args.base_lr * 3, transition_steps=2000)
 else:
@@ -264,6 +270,18 @@ def maybe_log(i):
       raise Exception('loss became nan!')
     tqdm.write(f'{i} {dt:.04f} {loss_float}')
 
+def save():
+  xy = calc_xy(params)
+  # rotate so map is straight up
+  n_pole = np.mean(xy[sph[:, 1] == 0], axis=0)
+  xy -= n_pole
+  s_pole = np.mean(xy[sph[:, 1] == TAU / 2], axis=0)
+  rot = -(TAU / 4 + np.arctan2(s_pole[1], s_pole[0]))
+  print(f'saving [shift={n_pole}, rotation={rot}]...')
+  xy = rotate(xy, rot)
+  serialization.save(name, sph, triangles, xy)
+
+
 consecutive_whole = 0
 safe = True
 for i in tqdm(range(n_iters)):
@@ -282,19 +300,12 @@ for i in tqdm(range(n_iters)):
   else:
     consecutive_whole += 1
 
+  if i % args.save_period == 0:
+    save()
+
+
 maybe_log(n_iters)
-
-xy = calc_xy(params)
-# rotate so map is straight up
-n_pole = np.mean(xy[sph[:, 1] == 0], axis=0)
-xy -= n_pole
-s_pole = np.mean(xy[sph[:, 1] == TAU / 2], axis=0)
-rot = -(TAU / 4 + np.arctan2(s_pole[1], s_pole[0]))
-print(f'shifting by {n_pole}, rotating by {rot}...')
-xy = rotate(xy, rot)
-
-print('saving...')
-serialization.save(name, sph, triangles, xy)
+save()
 
 print(f'xy stdev: {jnp.std(xy[:, 0])} {jnp.std(xy[:, 1])}')
 if args.show:
