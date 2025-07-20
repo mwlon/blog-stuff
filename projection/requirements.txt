@@ -6,5 +6,3 @@ tabulate
 tqdm
 pcodec
 scipy
-etils
-importlib_resources

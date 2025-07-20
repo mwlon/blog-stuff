@@ -1,23 +1,15 @@
-from typing import Any
 import os
-import json
 import numpy as np
 from jax import numpy as jnp
-import matplotlib as mpl
-import cv2
-from matplotlib import pyplot as plt
-from dataclasses import dataclass, field
-from datetime import datetime
-import argparse
 import jax
-from jax import jit, grad, vmap
-from tabulate import tabulate
 import re
 
 TAU = 2 * jnp.pi
 
+
 def normalized(v):
   return v / np.linalg.norm(v, axis=1)[:, None]
+
 
 def plane_angle_between(u, v):
   dot = np.sum(normalized(u) * normalized(v), axis=1)
@@ -25,10 +17,12 @@ def plane_angle_between(u, v):
   dot[dot < -1] = -1
   return TAU / 2 - np.arccos(dot)
 
+
 def arclength_between(u, v):
   euc_displacement = u - v
   euc_norm2 = np.sum(euc_displacement * euc_displacement, axis=1)
   return np.arccos(1 - euc_norm2 / 2)
+
 
 def calc_areas_angles_lengths(euc, triples):
   euc_triples = np.take_along_axis(euc[None, :, :], triples[:, :, None], axis=1)
@@ -42,6 +36,7 @@ def calc_areas_angles_lengths(euc, triples):
   uv_length = arclength_between(euc_triples[:, 0], euc_triples[:, 1])
   wv_length = arclength_between(euc_triples[:, 2], euc_triples[:, 1])
   return areas, angles, uv_length, wv_length
+
 
 def calc_inv_atlas(angles, uv_length, wv_length):
   # since we don't care about rotation, we choose a basis
@@ -57,8 +52,10 @@ def calc_inv_atlas(angles, uv_length, wv_length):
   inv_atlas[:, 1, 1] = 1 / c
   return inv_atlas
 
+
 def ratio_loss(r):
-  return r ** 1 + 1 / r ** 1
+  return r**1 + 1 / r**1
+
 
 def distortion_singular_values(distortion):
   a = distortion[:, 0, 0]
@@ -71,13 +68,16 @@ def distortion_singular_values(distortion):
   val1 = jnp.sqrt((norm2 + desc) / 2)
   return val0, val1
 
+
 def area_angle_multipliers(distortion):
   val0, val1 = distortion_singular_values(distortion)
   return val0 * val1, val1 / val0
 
+
 def raw_area_angle_loss(distortion):
   area_mult, angle_mult = area_angle_multipliers(distortion)
   return ratio_loss(area_mult), ratio_loss(angle_mult)
+
 
 def area_angle_loss(distortion, area_weight, angle_weight):
   area_loss, angle_loss = raw_area_angle_loss(distortion)
@@ -86,27 +86,37 @@ def area_angle_loss(distortion, area_weight, angle_weight):
   angle_loss = jnp.sum(angle_loss * angle_weight) / jnp.sum(angle_weight)
   return area_loss, angle_loss
 
+
 def calc_tangent_vecs(xy, triples):
   xy_triples = jnp.take_along_axis(xy[None, :, :], triples[:, :, None], axis=1)
   uv = xy_triples[:, 0] - xy_triples[:, 1]
   wv = xy_triples[:, 2] - xy_triples[:, 1]
   return jnp.stack([uv, wv], axis=2)
 
+
 def calc_distortion(inv_atlas, tangent_vecs):
   return tangent_vecs @ inv_atlas
 
+
 def filter_trained(filter_):
-  all_names = sorted([name for name in os.listdir('results') if os.path.isfile(f'results/{name}/triangles.pco')])
+  all_names = sorted(
+    [
+      name
+      for name in os.listdir("results")
+      if os.path.isfile(f"results/{name}/triangles.pco")
+    ]
+  )
   if filter_ is None:
     return all_names
   res = []
-  substrings = filter_.split(',')
+  substrings = filter_.split(",")
   for name in all_names:
     for substr in substrings:
       if substr in name or re.match(substr, name):
         res.append(name)
         break
   return res
+
 
 def calc_euc(sph):
   theta = sph[:, 0]
@@ -117,13 +127,51 @@ def calc_euc(sph):
   z = np.cos(phi)
   return np.stack([x, y, z], axis=1)
 
+
 def rotate(xy, rot):
   # without highest matmul precision, we can easily get nan loss on CUDA
   jax.config.update("jax_default_matmul_precision", "highest")
   rot_mat = jnp.array([[np.cos(rot), np.sin(rot)], [-np.sin(rot), np.cos(rot)]])
   return xy @ rot_mat
 
+
 def calc_distortion_dets(distortion):
   assert len(distortion.shape) == 3
-  return distortion[:, 0, 0] * distortion[:, 1, 1] - distortion[:, 0, 1] * distortion[:, 1, 0]
-  
+  return (
+    distortion[:, 0, 0] * distortion[:, 1, 1]
+    - distortion[:, 0, 1] * distortion[:, 1, 0]
+  )
+
+
+def det2(x00, x01, x10, x11):
+  return x00 * x11 - x01 * x10
+
+
+def det3(x):
+  return (
+    x[:, 0, 0] * det2(x[:, 1, 1], x[:, 1, 2], x[:, 2, 1], x[:, 2, 2])
+    - x[:, 0, 1] * det2(x[:, 1, 0], x[:, 1, 2], x[:, 2, 0], x[:, 2, 2])
+    + x[:, 0, 2] * det2(x[:, 1, 0], x[:, 1, 1], x[:, 2, 0], x[:, 2, 1])
+  )
+
+
+def calc_orientation_dets(euc, triangles, xyz):
+  tiled_xyz = np.tile(
+    xyz,
+    [triangles.shape[0], 1],
+  )
+  dets = []
+  for vertex_i, vertex_j in [(1, 2), (2, 0), (0, 1)]:
+    a = euc[triangles[:, vertex_i]]
+    b = euc[triangles[:, vertex_j]]
+    mats = np.stack([a, b, tiled_xyz], axis=1)
+    dets.append(det3(mats))
+
+  return dets
+
+
+def calc_max_side_lengths(euc, triangles):
+  x = euc[triangles[:, 0]]
+  y = euc[triangles[:, 1]]
+  z = euc[triangles[:, 2]]
+  return np.max(np.linalg.norm(np.stack([x - y, y - z, z - x], axis=1), axis=2), axis=1)

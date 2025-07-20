@@ -1,127 +1,136 @@
 import numpy as np
 from jax import numpy as jnp
-import matplotlib as mpl
-from matplotlib import pyplot as plt
 import argparse
 import jax
 import optax
-from map_utils import plot_map, plot_mults, calc_water_prop
-from lattice import build_lattice, triples_for_triangles
-from math_utils import arclength_between, plane_angle_between, calc_inv_atlas, calc_areas_angles_lengths, area_angle_loss, area_angle_multipliers, calc_tangent_vecs, calc_distortion, rotate, calc_distortion_dets
+from map_utils import plot_map, calc_water_prop
+from lattice import build_lattice
+from math_utils import (
+  calc_inv_atlas,
+  calc_areas_angles_lengths,
+  area_angle_loss,
+  calc_tangent_vecs,
+  calc_distortion,
+  rotate,
+  calc_distortion_dets,
+)
 import time
 from tqdm import tqdm
 import traditional
-import warnings
 import os
 import serialization
-from pathlib import Path
-import shutil
 
 TAU = 2 * jnp.pi
 # after this many consecutive safe updates that didn't require halvings, turn
 # on unsafe ones
 
-#cache_path = "/tmp/jax_cache"
-#if Path(cache_path).exists():
+# cache_path = "/tmp/jax_cache"
+# if Path(cache_path).exists():
 #  shutil.rmtree(cache_path)
-#jax.clear_caches()
-#jax.config.update("jax_compilation_cache_dir", cache_path)
-#jax.config.update("jax_persistent_cache_min_entry_size_bytes", -1)
-#jax.config.update("jax_persistent_cache_min_compile_time_secs", 0)
-#jax.config.update("jax_persistent_cache_enable_xla_caches", "xla_gpu_per_fusion_autotune_cache_dir")
+# jax.clear_caches()
+# jax.config.update("jax_compilation_cache_dir", cache_path)
+# jax.config.update("jax_persistent_cache_min_entry_size_bytes", -1)
+# jax.config.update("jax_persistent_cache_min_compile_time_secs", 0)
+# jax.config.update("jax_persistent_cache_enable_xla_caches", "xla_gpu_per_fusion_autotune_cache_dir")
 
 parser = argparse.ArgumentParser()
 parser.add_argument(
-  '--n-iters',
+  "--n-iters",
   type=int,
   default=1000,
-  help='number of gradient descent iterations',
+  help="number of gradient descent iterations",
 )
 parser.add_argument(
-  '--side-n',
+  "--side-n",
   type=int,
   default=240,
-  help='number of lattice points around equator',
+  help="number of lattice points around equator",
 )
 parser.add_argument(
-  '--meme-key',
+  "--meme-key",
   type=int,
   default=None,
-  help='key for meme random normal initialization',
+  help="key for meme random normal initialization",
 )
 parser.add_argument(
-  '--area-loss-prop',
+  "--area-loss-prop",
   type=float,
   default=0.5,
-  help='what % of loss should be area (as opposed to angle)',
+  help="what % of loss should be area (as opposed to angle)",
 )
 parser.add_argument(
-  '--base-lr',
+  "--base-lr",
   type=float,
   default=0.03,
-  help='base learning rate for Adam or SGD; or max step size for LBFGS',
+  help="base learning rate for Adam or SGD; or max step size for LBFGS",
 )
 parser.add_argument(
-  '--opt',
+  "--opt",
   type=str,
-  default='lbfgs',
-  help='optimizer to use',
+  default="lbfgs",
+  help="optimizer to use",
 )
 parser.add_argument(
-  '--name',
+  "--name",
   type=str,
   required=True,
-  help='name to save results under',
+  help="name to save results under",
 )
 parser.add_argument(
-  '--show',
-  action='store_true',
-  help='whether to show or not',
+  "--show",
+  action="store_true",
+  help="whether to show or not",
 )
 parser.add_argument(
-  '--log-period',
+  "--log-period",
   type=int,
   default=100,
-  help='log loss every this many iterations',
+  help="log loss every this many iterations",
 )
 parser.add_argument(
-  '--plot-on-logs',
-  action='store_true',
-  help='save every time we log loss instead of only at the end',
+  "--plot-on-logs",
+  action="store_true",
+  help="save every time we log loss instead of only at the end",
 )
 parser.add_argument(
-  '--save-period',
+  "--save-period",
   type=int,
   default=5000,
-  help='save the map projection every n iterations',
+  help="save the map projection every n iterations",
 )
 parser.add_argument(
-  '--schedule',
+  "--schedule",
   type=str,
-  default='const',
-  help='learning rate schedule',
+  default="const",
+  help="learning rate schedule",
 )
 parser.add_argument(
-  '--initial',
+  "--initial",
   type=str,
-  default='natural earth',
-  help='initial condition; another traditional or trained map projection',
+  default="natural earth",
+  help="initial condition; another traditional or trained map projection",
 )
 parser.add_argument(
-  '--water-angle-loss-mult',
+  "--water-angle-loss-mult",
   type=float,
   default=1.0,
-  help='how much to multiply angular loss in water by',
+  help="how much to multiply angular loss in water by",
 )
 parser.add_argument(
-  '--more-interrupted',
-  action='store_true',
+  "--water-source",
+  type=str,
+  default="land_shallow_topo_8192.tif",
+  help="source image to use for water detection",
 )
 parser.add_argument(
-  '--unsafe-update-thresh',
+  "--more-interrupted",
+  action="store_true",
+)
+parser.add_argument(
+  "--unsafe-update-thresh",
   type=int,
   default=100,
-  help='after how many un-halved safe updates to start doing faster unsafe updates',
+  help="after how many un-halved safe updates to start doing faster unsafe updates",
 )
 
 args = parser.parse_args()
@@ -129,23 +138,26 @@ name = args.name
 n_iters = args.n_iters
 area_loss_prop = args.area_loss_prop
 
-print('initializing...')
+print("initializing...")
 if args.meme_key is None:
   initial = args.initial.lower()
   try:
-    initial_projection = next(proj for proj in traditional.projections if proj.name.lower() == initial)
-    print('[traditional projection initialization] computing lattice...')
+    initial_projection = next(
+      proj for proj in traditional.projections if proj.name.lower() == initial
+    )
+    print("[traditional projection initialization] computing lattice...")
     lattice = build_lattice(args.side_n, more_interrupted=args.more_interrupted)
     params = traditional.calc_xy(initial_projection, lattice.sph)
   except StopIteration:
     proj = serialization.load(initial)
-    print('[pretrained projection initialization] reusing lattice...')
+    print("[pretrained projection initialization] reusing lattice...")
     lattice = proj.lattice()
     params = proj.xy
+
   def calc_xy(params):
     return params
 else:
-  print('[meme initialization] computing lattice...')
+  print("[meme initialization] computing lattice...")
   lattice = build_lattice(args.side_n, more_interrupted=args.more_interrupted)
   initializer = jax.nn.initializers.he_normal()
   hd = 16
@@ -155,10 +167,14 @@ else:
     jax.random.normal(jax.random.key(key + 1), (hd,), jnp.float32),
     initializer(jax.random.key(key + 2), (hd, 2), jnp.float32),
   ]
-  def calc_xy(params):
-    return jax.nn.tanh(sph / jnp.array([TAU, TAU / 2]) @ params[0] + params[1]) @ params[2]
 
-print('precomputing quantities...')
+  def calc_xy(params):
+    return (
+      jax.nn.tanh(sph / jnp.array([TAU, TAU / 2]) @ params[0] + params[1]) @ params[2]
+    )
+
+
+print("precomputing quantities...")
 sph = lattice.sph
 euc = lattice.euc
 triangles = lattice.triangles
@@ -167,7 +183,7 @@ n = sph.shape[0]
 
 areas, angles, uv_length, wv_length = calc_areas_angles_lengths(euc, triples)
 inv_atlas = calc_inv_atlas(angles, uv_length, wv_length)
-water_prop = calc_water_prop(sph, triangles)
+water_prop = calc_water_prop(sph, triangles, source=args.water_source)
 triangle_terrain_mult = (1 - water_prop) + args.water_angle_loss_mult * water_prop
 terrain_mult = np.take(triangle_terrain_mult, lattice.triple_triangle_idxs())
 area_weight = areas * angles
@@ -180,12 +196,14 @@ orig_distortion = calc_distortion(inv_atlas, orig_tangent_vecs)
 orig_distortion_dets = calc_distortion_dets(orig_distortion)
 orig_distortion_det_signs = orig_distortion_dets >= 0
 
+
 def loss(params):
   xy = calc_xy(params)
   tangent_vecs = calc_tangent_vecs(xy, triples)
   distortion = calc_distortion(inv_atlas, tangent_vecs)
   area_loss, angle_loss = area_angle_loss(distortion, area_weight, angle_weight)
   return area_loss_prop * area_loss + (1 - area_loss_prop) * angle_loss
+
 
 def update_is_unsafe(params_updates_iter):
   params, updates, i = params_updates_iter
@@ -195,38 +213,48 @@ def update_is_unsafe(params_updates_iter):
   distortion_det_signs = calc_distortion_dets(distortion) >= 0
   return jnp.array(i < 10) & jnp.any(distortion_det_signs != orig_distortion_det_signs)
 
+
 def halve_updates(params_updates_iter):
   params, updates, i = params_updates_iter
   return params, updates / 2.0, i + 1
 
+
 def safely_apply_updates(params, updates):
-  params, updates, halvings = jax.lax.while_loop(update_is_unsafe, halve_updates, (params, updates, 0))
+  params, updates, halvings = jax.lax.while_loop(
+    update_is_unsafe, halve_updates, (params, updates, 0)
+  )
 
   result = params + updates
   return result, halvings
 
-if args.schedule == 'cosine':
-  schedule = optax.cosine_decay_schedule(args.base_lr, decay_steps=n_iters + 1, alpha = 0.01)
-elif args.schedule == 'const':
+
+if args.schedule == "cosine":
+  schedule = optax.cosine_decay_schedule(
+    args.base_lr, decay_steps=n_iters + 1, alpha=0.01
+  )
+elif args.schedule == "const":
   schedule = optax.constant_schedule(args.base_lr)
-elif args.schedule == 'ramp':
-  schedule = optax.linear_schedule(args.base_lr, args.base_lr * 3, transition_steps=2000)
+elif args.schedule == "ramp":
+  schedule = optax.linear_schedule(
+    args.base_lr, args.base_lr * 3, transition_steps=2000
+  )
 else:
-  raise Exception('unknown learning rate schedule')
+  raise Exception("unknown learning rate schedule")
 
 opt_name = args.opt
-print(f'training with {opt_name}...')
+print(f"training with {opt_name}...")
 log_period = args.log_period
 
-if opt_name == 'adam':
+if opt_name == "adam":
   opt = optax.adam(schedule, b2=0.99)
-elif opt_name == 'lbfgs':
+elif opt_name == "lbfgs":
   opt = optax.lbfgs(schedule)
-elif opt_name == 'sgd':
+elif opt_name == "sgd":
   opt = optax.sgd(schedule)
 else:
-  raise Exception('unknown optimizer')
-   
+  raise Exception("unknown optimizer")
+
+
 @jax.jit
 def safely_update(params, opt_state):
   loss_value, params_grad = jax.value_and_grad(loss)(params)
@@ -240,6 +268,7 @@ def safely_update(params, opt_state):
   )
   params, halvings = safely_apply_updates(params, updates)
   return params, opt_state, halvings
+
 
 @jax.jit
 def unsafely_update(params, opt_state):
@@ -255,20 +284,26 @@ def unsafely_update(params, opt_state):
   params = optax.apply_updates(params, updates)
   return params, opt_state, 0
 
+
 opt_state = opt.init(params)
-print(f'{opt_name}...')
+print(f"{opt_name}...")
 
 t = time.time()
+
+
 def maybe_log(i):
   if i % log_period == 0:
     dt = time.time() - t
     if args.plot_on_logs:
       xy = calc_xy(params)
-      plot_map(name, sph, xy, triangles, draw_lines=False, show=False, step=i, title='earth')
+      plot_map(
+        name, sph, xy, triangles, draw_lines=False, show=False, step=i, title="earth"
+      )
     loss_float = loss(params).item()
     if not jnp.isfinite(loss_float):
-      raise Exception('loss became nan!')
-    tqdm.write(f'{i} {dt:.04f} {loss_float}')
+      raise Exception("loss became nan!")
+    tqdm.write(f"{i} {dt:.04f} {loss_float}")
+
 
 def save():
   xy = calc_xy(params)
@@ -277,7 +312,7 @@ def save():
   xy -= n_pole
   s_pole = np.mean(xy[sph[:, 1] == TAU / 2], axis=0)
   rot = -(TAU / 4 + np.arctan2(s_pole[1], s_pole[0]))
-  tqdm.write(f'saving [shift={n_pole}, rotation={rot}]...')
+  tqdm.write(f"saving [shift={n_pole}, rotation={rot}]...")
   xy = rotate(xy, rot)
   serialization.save(name, sph, triangles, xy)
   return xy
@@ -287,7 +322,9 @@ consecutive_whole = 0
 safe = True
 for i in tqdm(range(n_iters)):
   if safe and consecutive_whole >= args.unsafe_update_thresh:
-    tqdm.write(f'Enabling unsafe updates! The last {consecutive_whole} updates where whole')
+    tqdm.write(
+      f"Enabling unsafe updates! The last {consecutive_whole} updates where whole"
+    )
     safe = False
 
   maybe_log(i)
@@ -296,7 +333,7 @@ for i in tqdm(range(n_iters)):
   else:
     params, opt_state, halvings = unsafely_update(params, opt_state)
   if halvings > 0:
-    tqdm.write(f'WARNING: halved update {halvings} times')
+    tqdm.write(f"WARNING: halved update {halvings} times")
     consecutive_whole = 0
   else:
     consecutive_whole += 1
@@ -308,14 +345,13 @@ for i in tqdm(range(n_iters)):
 maybe_log(n_iters)
 xy = save()
 
-print(f'xy stdev: {jnp.std(xy[:, 0])} {jnp.std(xy[:, 1])}')
+print(f"xy stdev: {jnp.std(xy[:, 0])} {jnp.std(xy[:, 1])}")
 if args.show:
-  print('plotting...')
-  os.makedirs(f'results/{name}', exist_ok=True)
-  plot_map(name, sph, xy, triangles, show=args.show, title='earth')
+  print("plotting...")
+  os.makedirs(f"results/{name}", exist_ok=True)
+  plot_map(name, sph, xy, triangles, show=args.show, title="earth")
 
 tangent_vecs = calc_tangent_vecs(xy, triples)
 distortion = calc_distortion(inv_atlas, tangent_vecs)
 area_loss, angle_loss = area_angle_loss(distortion, area_weight, angle_weight)
-print(f'{area_loss.item()=} {angle_loss.item()=}')
-
+print(f"{area_loss.item()=} {angle_loss.item()=}")

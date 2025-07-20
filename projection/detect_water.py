@@ -12,12 +12,18 @@ parser.add_argument(
   help='number of lattice points around equator, if you want to draw triangles',
 )
 parser.add_argument(
+  '--source',
+  type=str,
+  default='land_shallow_topo_8192.tif',
+  help='source image to detect water from',
+)
+parser.add_argument(
   '--draw-lines',
   action='store_true',
 )
 args = parser.parse_args()
 
-is_water = map_utils.detect_water()
+is_water = map_utils.detect_water(args.source)
 if args.side_n is None:
   out_img = np.where(is_water, 255, 0).astype(np.uint8)
 else:
@@ -55,7 +61,6 @@ else:
         for j, k in [[0, 1], [1, 2], [2, 0]]:
           cv2.line(out_img, sub_xy[j], sub_xy[k], color=color)
 
-print(out_img.shape, out_img.dtype)
 cv2.imwrite('water.png', out_img)
 cv2.imshow('water', out_img)
 cv2.waitKey(0)

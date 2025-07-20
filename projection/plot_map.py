@@ -4,7 +4,15 @@ from map_utils import plot_map, plot_mults
 from lattice import build_lattice, triples_for_triangles
 import traditional
 import serialization
-from math_utils import calc_areas_angles_lengths, area_angle_multipliers, calc_inv_atlas, calc_euc, calc_tangent_vecs, calc_distortion, rotate
+from math_utils import (
+  calc_areas_angles_lengths,
+  area_angle_multipliers,
+  calc_inv_atlas,
+  calc_euc,
+  calc_tangent_vecs,
+  calc_distortion,
+  rotate,
+)
 import numpy as np
 
 MAX_MULT = 100.0
@@ -12,90 +20,123 @@ TAU = 2 * np.pi
 
 parser = argparse.ArgumentParser()
 parser.add_argument(
-  '--all-traditional',
-  action='store_true',
-  help='plot all traditional projections',
+  "--all-traditional",
+  action="store_true",
+  help="plot all traditional projections",
 )
 parser.add_argument(
-  '--trained',
+  "--trained",
   type=str,
-  help='name of trained map projection to draw',
+  help="name of trained map projection to draw",
 )
 parser.add_argument(
-  '--side-n',
+  "--side-n",
   type=int,
   default=256,
-  help='max width of lattice to use for traditional projections',
+  help="max width of lattice to use for traditional projections",
 )
 parser.add_argument(
-  '--show',
-  action='store_true',
-  help='whether to show or not',
+  "--show",
+  action="store_true",
+  help="whether to show or not",
 )
 parser.add_argument(
-  '--distortion',
-  action='store_true',
-  help='whether to make area and angle distortion plots',
+  "--distortion",
+  action="store_true",
+  help="whether to make area and angle distortion plots",
 )
 parser.add_argument(
-  '--draw-lines',
-  action='store_true',
-  help='whether to overlay triangles on map',
+  "--draw-lines",
+  action="store_true",
+  help="whether to overlay triangles on map",
 )
 parser.add_argument(
-  '--scale',
+  "--scale",
   type=int,
   default=1024,
-  help='how large of a map to make',
+  help="how large of a map to make",
 )
 parser.add_argument(
-  '--rotate-degrees',
+  "--rotate-degrees",
   type=float,
   default=0.0,
-  help='how much to rotate the plot by',
+  help="how much to rotate the plot by",
 )
 parser.add_argument(
-  '--title',
+  "--title",
   type=str,
-  default='earth',
-  help='title to write on the distortion plot and filename of a trained projection',
+  default="earth",
+  help="title to write on the distortion plot and filename of a trained projection",
 )
 parser.add_argument(
-  '--source',
+  "--source",
   type=str,
   default=None,
-  help='reference equirectangular projection image to draw from',
+  help="reference equirectangular projection image to draw from",
+)
+parser.add_argument(
+  "--tissot",
+  action="store_true",
+  help="overlay Tissot's indicatrix of position",
 )
 
 args = parser.parse_args()
 show = args.show
 
+
 def safe_mult(mult, default):
-  return np.minimum(np.nan_to_num(mult, nan=default, posinf=default, neginf=default), MAX_MULT)
+  return np.minimum(
+    np.nan_to_num(mult, nan=default, posinf=default, neginf=default), MAX_MULT
+  )
+
 
 def rotate_(xy):
   rot = args.rotate_degrees * TAU / 360
   return rotate(xy, rot)
+
 
 if args.all_traditional:
   lattice = build_lattice(args.side_n, include_degenerate=True)
   sph = lattice.sph
 
   for projection in traditional.projections:
-    print(f'{projection.name}...')
-    os.makedirs(f'results/{projection.name}', exist_ok=True)
+    print(f"{projection.name}...")
+    os.makedirs(f"results/{projection.name}", exist_ok=True)
     xy, filtered_triangles = traditional.project(projection, sph, lattice.triangles)
     xy = rotate_(xy)
-    plot_map(projection.name, sph, xy, filtered_triangles, show=show, draw_lines=args.draw_lines, scale=args.scale)
+    plot_map(
+      projection.name,
+      sph,
+      xy,
+      filtered_triangles,
+      show=show,
+      draw_lines=args.draw_lines,
+      scale=args.scale,
+      tissot=args.tissot,
+    )
 
     if args.distortion:
       triples = triples_for_triangles(lattice.triangles)
       inv_metric = traditional.calc_inv_metric(sph)
-      distortion = traditional.calc_distortion(projection, sph, inv_metric)[triples[:, 1]]
+      distortion = traditional.calc_distortion(projection, sph, inv_metric)[
+        triples[:, 1]
+      ]
       area_mults, angle_mults = area_angle_multipliers(distortion)
-      area_mults = safe_mult(area_mults, default=1.0 if projection.equal_area else MAX_MULT)
-      angle_mults = safe_mult(angle_mults, default=1.0 if projection.conformal else MAX_MULT)
-      plot_mults(projection.name, xy, lattice.triangles, area_mults, angle_mults, show=show, title=projection.name)
+      area_mults = safe_mult(
+        area_mults, default=1.0 if projection.equal_area else MAX_MULT
+      )
+      angle_mults = safe_mult(
+        angle_mults, default=1.0 if projection.conformal else MAX_MULT
+      )
+      plot_mults(
+        projection.name,
+        xy,
+        lattice.triangles,
+        area_mults,
+        angle_mults,
+        show=show,
+        title=projection.name,
+      )
 
 if args.trained is not None:
   name = args.trained
@@ -104,7 +145,18 @@ if args.trained is not None:
   xy = loaded.xy
   xy = rotate_(xy)
   triangles = loaded.triangles
-  plot_map(name, sph, xy, triangles, show=show, draw_lines=args.draw_lines, scale=args.scale, source=args.source, title=args.title)
+  plot_map(
+    name,
+    sph,
+    xy,
+    triangles,
+    show=show,
+    draw_lines=args.draw_lines,
+    scale=args.scale,
+    source=args.source,
+    title=args.title,
+    tissot=args.tissot,
+  )
 
   if args.distortion:
     euc = calc_euc(sph)
@@ -114,4 +166,6 @@ if args.trained is not None:
     tangent_vecs = calc_tangent_vecs(xy, triples)
     distortion = calc_distortion(inv_atlas, tangent_vecs)
     area_mults, angle_mults = area_angle_multipliers(distortion)
-    plot_mults(name, xy, triangles, area_mults, angle_mults, show=show, title=args.title)
+    plot_mults(
+      name, xy, triangles, area_mults, angle_mults, show=show, title=args.title
+    )
