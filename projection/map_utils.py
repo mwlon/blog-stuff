@@ -5,7 +5,7 @@ from matplotlib import pyplot as plt
 from typing import Optional
 import os
 import math_utils
-import scipy.linalg
+import itertools
 
 TAU = 2 * np.pi
 
@@ -171,7 +171,7 @@ def draw_tissot_ellipse(euc, triangle, out_xy, theta, phi, out_img):
     rotation,
     0,
     360,
-    (0, 150, 255, 255),
+    (0, 100, 40, 255),
     -1,
   )
 
@@ -188,6 +188,8 @@ def plot_map(
   step: Optional[int] = None,
   source: str | None = None,
   tissot: bool = False,
+  draw_lat: int | None = None,
+  draw_lng: int | None = None,
 ):
   if source is None:
     source = "land_shallow_topo_8192.tif"
@@ -233,11 +235,48 @@ def plot_map(
   if draw_lines:
     for idxs in triangles:
       sub_pts = calc_sub_pts(sph_pts[idxs], out_xys[idxs])
-      color = [0, 0, 255, 255] if len(sub_pts) == 1 else [0, 200, 200, 255]
+      color = [255, 255, 255, 255] if len(sub_pts) == 1 else [0, 200, 200, 255]
+      # color = [0, 0, 255, 255] if len(sub_pts) == 1 else [0, 200, 200, 255]
       for _, sub_xy in sub_pts:
         sub_xy = sub_xy.astype(np.int64)
         for j, k in [[0, 1], [1, 2], [2, 0]]:
           cv2.line(out_img, sub_xy[j], sub_xy[k], color=color)
+
+  theta, phi = np.ascontiguousarray(sph_pts.transpose())
+  out_xys_int = out_xys.astype(np.int64)
+  if draw_lat:
+    for lat_deg in range(draw_lat, 180, draw_lat):
+      target_phi = lat_deg * TAU / 360
+      # adjust to a phi that actually exists
+      target_phi = phi[np.argmin(np.abs(phi - target_phi))]
+      mask = np.abs(phi - target_phi) < 1e-6
+      thetas = theta[mask]
+      idxs = np.where(mask)[0][np.argsort(thetas)]
+      for i, j in itertools.pairwise(idxs):
+        cv2.line(
+          out_img,
+          out_xys_int[i],
+          out_xys_int[j],
+          color=[255, 255, 255, 255],
+          thickness=2,
+        )
+  if draw_lng:
+    polar_theta = theta[phi < (15.0 / 360 * TAU)]
+    for lng_deg in range(draw_lng, 360, draw_lng):
+      target_theta = lng_deg * TAU / 360
+      # adjust to a theta that actually exists near the poles
+      target_theta = polar_theta[np.argmin(np.abs(polar_theta - target_theta))]
+      mask = np.abs(theta - target_theta) < 1e-6
+      phis = phi[mask]
+      idxs = np.where(mask)[0][np.argsort(phis)]
+      for i, j in itertools.pairwise(idxs):
+        cv2.line(
+          out_img,
+          out_xys_int[i],
+          out_xys_int[j],
+          color=[255, 255, 255, 255],
+          thickness=2,
+        )
 
   fname = f"{title}_{step:05d}.png" if step is not None else f"{title}.png"
   dir_ = f"results/{name}"
@@ -313,7 +352,7 @@ def plot_mults(
 def detect_water(source):
   earth = cv2.imread(source)
   b, g, r = earth.transpose([2, 0, 1])
-  water_color = (b > 50) & (g < 50) & (r < 50)
+  water_color = (b > 45) & (g < 50) & (r < 50)
   plausible_position = np.ones_like(water_color)
   # parts of antarctica look like water, so we hack some of them to be land
   h, w, _ = earth.shape

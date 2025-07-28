@@ -79,6 +79,16 @@ parser.add_argument(
   action="store_true",
   help="overlay Tissot's indicatrix of position",
 )
+parser.add_argument(
+  "--draw-lat",
+  type=int,
+  help="draw a line of latitude every N degrees",
+)
+parser.add_argument(
+  "--draw-lng",
+  type=int,
+  help="draw a line of longitude every N degrees",
+)
 
 args = parser.parse_args()
 show = args.show
@@ -156,6 +166,8 @@ if args.trained is not None:
     source=args.source,
     title=args.title,
     tissot=args.tissot,
+    draw_lat=args.draw_lat,
+    draw_lng=args.draw_lng,
   )
 
   if args.distortion:

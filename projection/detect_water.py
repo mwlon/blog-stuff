@@ -6,20 +6,19 @@ import lattice
 
 parser = argparse.ArgumentParser()
 parser.add_argument(
-  '--side-n',
+  "--side-n",
   type=int,
-  default=None,
-  help='number of lattice points around equator, if you want to draw triangles',
+  help="number of lattice points around equator, if you want to draw triangles",
 )
 parser.add_argument(
-  '--source',
+  "--source",
   type=str,
-  default='land_shallow_topo_8192.tif',
-  help='source image to detect water from',
+  default="land_shallow_topo_8192.tif",
+  help="source image to detect water from",
 )
 parser.add_argument(
-  '--draw-lines',
-  action='store_true',
+  "--draw-lines",
+  action="store_true",
 )
 args = parser.parse_args()
 
@@ -39,7 +38,9 @@ else:
   n = sph.shape[0]
   max_x, max_y = np.max(xy, axis=0)
   out_h, out_w = is_water.shape
-  out_xys = map_utils.calc_out_xys(xy, out_w=out_w, out_h=out_h, max_x=max_x, max_y=max_y)
+  out_xys = map_utils.calc_out_xys(
+    xy, out_w=out_w, out_h=out_h, max_x=max_x, max_y=max_y
+  )
   out_img = np.full([out_h, out_w, 3], 255).astype(np.uint8)
 
   for i, idxs in enumerate(triangles):
@@ -54,14 +55,14 @@ else:
 
   if args.draw_lines:
     for idxs in triangles:
-      sub_pts = calc_sub_pts(sph[idxs], out_xys[idxs])
+      sub_pts = map_utils.calc_sub_pts(sph[idxs], out_xys[idxs])
       color = [0, 0, 255] if len(sub_pts) == 1 else [0, 200, 200]
       for _, sub_xy in sub_pts:
         sub_xy = sub_xy.astype(np.int64)
         for j, k in [[0, 1], [1, 2], [2, 0]]:
           cv2.line(out_img, sub_xy[j], sub_xy[k], color=color)
 
-cv2.imwrite('water.png', out_img)
-cv2.imshow('water', out_img)
+cv2.imwrite("water.png", out_img)
+cv2.imshow("water", out_img)
 cv2.waitKey(0)
 cv2.destroyAllWindows()
