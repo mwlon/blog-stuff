@@ -46,6 +46,12 @@ parser.add_argument(
   type=str,
   help="path to bathymetry image",
 )
+parser.add_argument(
+  "--whiten",
+  type=float,
+  default=0.0,
+  help="how much to whiten the image, from 0 to 1",
+)
 args = parser.parse_args()
 
 
@@ -56,9 +62,9 @@ def parse_hsv(hsv_str):
 
 if args.detect_water or args.bathymetry:
   is_water = map_utils.detect_water(args.source)
+  is_water_f32 = is_water.astype(np.float32)
 
 if args.detect_water:
-  is_water_f32 = is_water.astype(np.float32)
   out_hsv = (is_water_f32[:, :, None] * parse_hsv(args.water_hsv)[None, None, :]) + (
     (1.0 - is_water_f32[:, :, None]) * parse_hsv(args.land_hsv)[None, None, :]
   )
@@ -85,18 +91,45 @@ if args.sea_green:
   tmp *= (prop * 0.9 + (1 - prop))[:, :, None]
   out = tmp.astype(np.uint8)
 
+
+def ramp(x, a, b):
+  return (x.clip(a, b) - a) / (b - a)
+
+
 if args.bathymetry:
-  tmp = out.astype(np.float32)
   bathy = cv2.imread(args.bathymetry)
-  assert bathy.shape == tmp.shape
+  assert bathy.shape == out.shape
   assert bathy.shape[2] == 3  # bgr
-  shallowness = np.sum(bathy, axis=2)
-  is_water = is_water | (shallowness < 765)
-  incr = (shallowness * is_water) / 765.0
-  tmp[..., 0] = tmp[..., 0] - 10 + incr * 25
-  tmp[..., 1] = tmp[..., 1] + 13 + incr * 30
-  tmp[..., 2] = tmp[..., 2] - 7 + incr * 6.0
+
+  shallowness = np.sum(bathy, axis=2) / 765.0
+  tmp = out.astype(np.float32)
+  tmp[..., 0] = tmp[..., 0] - 10 + shallowness * 25
+  tmp[..., 1] = tmp[..., 1] + 13 + shallowness * 30
+  tmp[..., 2] = tmp[..., 2] - 7 + shallowness * 6
   tmp = np.clip(tmp, 0, 255).astype(np.uint8)
-  out = (~is_water[:, :, None]) * out + is_water[:, :, None] * tmp
+
+  # is_water_f32[shallowness < 1.0] = 1.0
+  b, g, r = img.transpose([2, 0, 1])
+  is_water_f32 = np.maximum(
+    is_water_f32,
+    np.min(
+      [
+        ramp(b, 0, 45),
+        1 - ramp(g, 50, 60),
+        1 - ramp(r, 50, 60),
+      ],
+      axis=0,
+    ),
+  )
+  out = ((1 - is_water_f32[:, :, None]) * out + is_water_f32[:, :, None] * tmp).astype(
+    np.uint8
+  )
+
+if args.whiten > 0:
+  out_hsv = cv2.cvtColor(out, cv2.COLOR_BGR2HSV)
+  out_hsv[..., 2] = (255.0 * ((out_hsv[..., 2] / 255.0) ** (1 - args.whiten))).astype(
+    np.uint8
+  )
+  out = cv2.cvtColor(out_hsv, cv2.COLOR_HSV2BGR)
 
 cv2.imwrite(args.dest, out)
