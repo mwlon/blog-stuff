@@ -6,6 +6,10 @@ import matplotlib
 matplotlib.use('MacOSX')
 from matplotlib import pyplot as plt
 import argparse
+from PIL import Image, ImageCms
+import io
+
+epsilon = 1E-8
 
 parser = argparse.ArgumentParser()
 parser.add_argument(
@@ -15,35 +19,35 @@ parser.add_argument(
 )
 parser.add_argument(
   '--dest_filename',
-  dest='dest_filename',
   type=str,
   help='path to the output image',
   default='out.png',
 )
 parser.add_argument(
-  '--k',
-  dest='k',
+  '--k_spatial',
   type=int,
-  help='how many clusters to make',
+  help='number of clusters for 1st step with both space+color channels; defaults to k; must be at least as great as k',
+)
+parser.add_argument(
+  '--k',
+  type=int,
+  help='final number of clusters after 2nd step with only color channels',
   default=50,
 )
 parser.add_argument(
   '--max_iters',
-  dest='max_iters',
   type=int,
   help='how many iterations to terminate at',
   default=30,
 )
 parser.add_argument(
   '--pos_weight',
-  dest='pos_weight',
   type=float,
   help='how much to weight coordinate position relative to color values',
   default=1.0,
 )
 parser.add_argument(
   '--agree_ratio',
-  dest='agree_ratio',
   type=float,
   help='how aggressively to smooth image after clustering',
   default=0.03,
@@ -56,9 +60,34 @@ parser.add_argument(
 )
 args = parser.parse_args()
 
-img = cv2.imread(args.source_filename)
+def group_mean(values, idxs, n):
+  dtype=values.dtype
+  res = np.zeros([n, values.shape[1]], dtype=dtype)
+  counts = np.zeros(n, dtype=dtype)
+  np.add.at(res, idxs, values)
+  np.add.at(counts, idxs, np.ones(idxs.shape[0], dtype=dtype))
+  return res / counts[:, None]
+
+def display_img(to_display):
+  cv2.imshow('', to_display)
+  while True:
+    key = cv2.waitKey(0)
+    if key in [27, 113]: # esc or q
+      break
+  
+  cv2.destroyAllWindows()
+
+def imread(f):
+  return cv2.imread(f)
+
+def imwrite(f, img):
+  cv2.imwrite(f, img, [cv2.IMWRITE_JPEG_QUALITY, 95])
+
+img = imread(args.source_filename)
+#display_img(img)
 assert img is not None
 k = args.k
+k_spatial = k if args.k_spatial is None else args.k_spatial
 max_iters = args.max_iters
 pos_weight = args.pos_weight
 assert pos_weight > 0
@@ -75,29 +104,27 @@ if scale < 1:
   print('resized shape', img.shape)
 
 h, w, _ = img.shape
-#cv2.imwrite('resized.png', img)
 
 if mode == 'hsv':
   h_scale = 10.0
-  s_scale = 2.0
   v_scale = 1.0 # actually value ^ 2 scale
-  n_channel = 4
+  n_channel = 3
   def process_img(img):
     hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
     interm = np.zeros([h, w, n_channel])
     hue_radians = hsv[:, :, 0] * np.pi / 90.0
-    value = (hsv[:, :, 2] / 255.0) ** 2
-    v_sat = hsv[:, :, 1] / 255.0 * value
+    value2 = (hsv[:, :, 2] / 255.0) ** 2
+    v_sat = hsv[:, :, 1] / 255.0 * value2
     interm[:, :, 0] = np.cos(hue_radians) * v_sat * h_scale
     interm[:, :, 1] = np.sin(hue_radians) * v_sat * h_scale
-    interm[:, :, 2] = v_sat * s_scale
-    interm[:, :, 3] = value * v_scale
+    interm[:, :, 2] = value2 * v_scale
     return interm
   
   def unprocess_img(interm):
     hsv = np.zeros([interm.shape[0], interm.shape[1], 3], dtype=np.uint8)
-    value = np.sqrt(interm[:, :, 3]) / v_scale
-    sat = interm[:, :, 2] / s_scale / value
+    value2 = interm[:, :, 2] / v_scale
+    value = np.sqrt(value2)
+    sat = np.sqrt(interm[:, :, 0] ** 2 + interm[:, :, 1] ** 2) / h_scale / (value2 + epsilon)
     hsv[:, :, 1] = np.round(sat * 255.0).astype(np.uint8)
     hsv[:, :, 2] = np.round(value * 255.0).astype(np.uint8)
     atan = np.arctan2(interm[:, :, 1], interm[:, :, 0])
@@ -137,61 +164,112 @@ else:
     img[:, :, 2] /= r_scale
     return img.astype(np.uint8)
 
+#recovered = unprocess_img(process_img(img))
+#for i in range(h):
+#    for j in range(w):
+#        orig_pixel = img[i, j].astype(np.float32)
+#        recovered_pixel = recovered[i, j].astype(np.float32)
+#        if np.linalg.norm(orig_pixel - recovered_pixel) > 5.0:
+#            print(i, j, orig_pixel, recovered_pixel)
+#            raise Exception('function is not invertible')
+
+
+#display_img(np.concatenate([img, recovered], axis=0))
 n_dim = n_channel + 2
 
-interm = process_img(img)
+interm = process_img(img).astype(np.float32)
 h_ratio = np.sqrt(h) / np.sqrt(w)
 w_ratio = 1 / h_ratio
 
 # make row data
-coords0 = np.zeros([h, 2])
+coords0 = np.zeros([h, 2], dtype=np.float32)
 coords0[:, 0] = np.linspace(0.0, h_ratio * pos_weight, h)
-coords1 = np.zeros([w, 2])
+coords1 = np.zeros([w, 2], dtype=np.float32)
 coords1[:, 1] = np.linspace(0.0, w_ratio * pos_weight, w)
 coords = coords0[:, None] + coords1[None, :]
 
-color_rows = np.zeros([h * w, n_dim])
-color_rows[:, :n_channel] = np.reshape(interm, [-1, n_channel])
-color_rows[:, n_channel:] = np.reshape(coords, [-1, 2])
+x_spatial = np.empty([h * w, n_dim], dtype=np.float32)
+x_spatial[:, :n_channel] = np.reshape(interm, [-1, n_channel])
+x_spatial[:, n_channel:] = np.reshape(coords, [-1, 2])
 
-# k means
-n_rows = color_rows.shape[0]
-centroid_inds = np.random.choice(np.arange(n_rows), k, replace=False)
-centroids = color_rows[centroid_inds]
-loss = None
-idxs = None
-counts = None
-epsilon = 1E-8
+def k_means(x, k, max_iters):
+  n_rows = x.shape[0]
+  centroid_inds = np.random.choice(np.arange(n_rows), k, replace=False)
+  centroids = x[centroid_inds]
+  loss = None
+  idxs = None
+  x_norm2 = np.linalg.norm(x, axis=1) ** 2
+  
+  for i in range(max_iters):
+    centroid_norm2 = np.linalg.norm(centroids, axis=1) ** 2
+    dists2 = x_norm2[:, None] + centroid_norm2[None, :] - 2 * x @ centroids.T
+    idxs = np.argmin(dists2, axis=1)
+    min_dists2 = dists2[range(n_rows), idxs]
+    new_loss = np.sum(min_dists2)
+    print(f'loss at {i}: {new_loss}')
+    centroids = group_mean(x, idxs, k)
+  
+    if loss is not None:
+      if new_loss > loss * 1.01:
+        raise Exception(f'noooo, {loss} became {new_loss}')
+      elif new_loss >= loss:
+        print('got same loss, exit')
+        break
+    loss = new_loss
+  return idxs, centroids
 
-for i in range(max_iters):
-  dists = np.linalg.norm(color_rows[None, :, :] - centroids[:, None, :], axis=2)
-  idxs = np.argmin(dists, axis=0)
-  min_dists = dists[idxs, range(n_rows)]
-  new_loss = np.sum(min_dists * min_dists)
-  print(f'loss at {i}: {new_loss}')
-  centroids = np.zeros([k, n_dim])
-  counts = np.zeros([k])
-  for i in range(n_rows):
-    centroids[idxs[i]] += color_rows[i]
-    counts[idxs[i]] += 1
-  centroids = centroids / (counts[:, None] + epsilon)
+def display_centroids(centroids, reshaped_idxs, name):
+  k = centroids.shape[0]
+  centroid_colors = unprocess_img(np.array([centroids]))[0]
+  plt.figure(figsize=(6,6))
+  plt.xlim(0, np.max(x_spatial[:, n_channel + 1]))
+  plt.ylim(-np.max(x_spatial[:, n_channel]), 0)
 
-  if loss is not None:
-    if new_loss > loss:
-      raise Exception('noooo')
-    elif new_loss == loss:
-      print('got same loss, exit')
-      break
-  loss = new_loss
+  centroid_xy = np.zeros([k, 2])
+  centroid_count = np.zeros(k)
+  np.add.at(centroid_xy, idxs, x_spatial[:, n_channel:])
+  np.add.at(centroid_count, idxs, np.ones(h * w))
+  centroid_xy /= centroid_count[:, None]
+  for i in range(k):
+    cluster_size = centroid_count[i]
+    cluster_y = -centroid_xy[i, 0]
+    cluster_x = centroid_xy[i, 1]
+    color_vec = centroid_colors[i] / 255.0
+    # print(f'cluster {i} with RGB {color_vec} has size {cluster_size} at {cluster_x} {cluster_y}')
+    color_tup = (color_vec[2], color_vec[1], color_vec[0])
+    size = cluster_size / float(h * w) * 5000
+    plt.axis('off')
+  
+    plt.scatter([cluster_x], [cluster_y], color=color_tup, s=size, alpha=0.3)
+  plt.savefig(f'{name}.png')
+  plt.show()
+
+idxs, centroids = k_means(x_spatial, k_spatial, args.max_iters)
+
+# remove spatial dimensions
+centroids = centroids[:, :n_channel]
+if k < k_spatial:
+  display_centroids(
+    centroids,
+    np.reshape(idxs, [h, w]),
+    'spatial_centroids',
+  )
+  print('FURTHER CLUSTERING COLOR CENTROIDS')
+  filter_idxs, filter_centroids = k_means(
+    centroids,
+    k,
+    100,
+  )
+  idxs = np.take(filter_idxs, idxs)
+  centroids = group_mean(x_spatial[:, :n_channel], idxs, k)
 
 reshaped_idxs = np.reshape(idxs, [h, w])
-mean_colors = centroids[:, :n_channel]
 out = np.zeros([h, w, n_channel])
 for c in range(n_channel):
-  out[:, :, c] = np.take(mean_colors[:, c], reshaped_idxs)
+  out[:, :, c] = np.take(centroids[:, c], reshaped_idxs)
 
 kmeans_img = unprocess_img(out)
-#cv2.imwrite('kmeans.png', kmeans_img)
+imwrite('kmeans.png', kmeans_img)
 
 def get_neigh(i, j):
   xoff = [0]
@@ -232,7 +310,7 @@ for it in range(n_micro_iter):
     best_idx = -1
     color = out[i, j, :n_channel]
     for oidx, ocount in agree_counts.items():
-      diff = centroids[oidx, :n_channel] - color
+      diff = centroids[oidx] - color
       error = np.sum(diff * diff) - agree_ratio * ocount * ocount
       if error < best_error:
         best_error = error
@@ -240,7 +318,7 @@ for it in range(n_micro_iter):
     if best_idx != idx:
       n_changes += 1
       reshaped_idxs[i, j] = best_idx
-      out[i, j] = centroids[best_idx, :n_channel]
+      out[i, j] = centroids[best_idx]
       for neigh in get_neigh(i, j):
         if neigh not in visited:
           frontier.append(neigh)
@@ -249,32 +327,8 @@ for it in range(n_micro_iter):
 
 
 out_img = unprocess_img(out)
-cv2.imwrite(args.dest_filename, out_img)
-
-def display_img(to_display):
-  cv2.imshow('', to_display)
-  while True:
-    key = cv2.waitKey(0)
-    if key in [27, 113]: # esc or q
-      break
-  
-  cv2.destroyAllWindows()
+imwrite(args.dest_filename, out_img)
 
 display_img(out_img)
-
-centroid_colors = unprocess_img(np.array([centroids[:, :n_channel]]))[0]
-plt.figure(figsize=(6,6))
-for i in range(k):
-  cluster_size = np.sum(reshaped_idxs == i)
-  cluster_y = -centroids[i, n_channel]
-  cluster_x = centroids[i, n_channel + 1]
-  color_vec = centroid_colors[i] / 255.0
-  # print(f'cluster {i} with RGB {color_vec} has size {cluster_size} at {cluster_x} {cluster_y}')
-  color_tup = (color_vec[2], color_vec[1], color_vec[0])
-  size = cluster_size / float(h * w) * 5000
-  plt.axis('off')
-
-  plt.scatter([cluster_x], [cluster_y], color=color_tup, s=size)
-plt.savefig('color_palette.png')
-plt.show()
+display_centroids(centroids, reshaped_idxs, 'final_centroids')
 
