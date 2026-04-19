@@ -1,4 +1,5 @@
 import numpy as np
+import time
 import matplotlib as mpl
 import cv2
 from matplotlib import pyplot as plt
@@ -8,6 +9,7 @@ import math_utils
 import itertools
 
 TAU = 2 * np.pi
+EPS = -1e-24
 
 
 def bbox(ptss):
@@ -125,23 +127,21 @@ def calc_sub_pts(sph, out_xy):
   return [(np.array(x)[:, :2], np.array(x)[:, 2:]) for x in sub_pts]
 
 
-def find_triangle_containing(euc, triangles, theta, phi, max_side_lengths):
+def find_triangle_containing(euc, triangles, xyz, max_side_lengths2):
   # https://graphallthethings.com/posts/interpolation/
-  xyz = math_utils.calc_euc(np.array([[theta, phi]]))[0]
   # For performance, we filter out triangles whose max side length is less than
   # the furthest vertex's distance to the target coordinates.
   # This check also serves the purpose of eliminating triangles on the opposite
   # side of the globe, which would otherwise be false positives.
-  eps = -1e-12
   triangle_euc = np.take(euc, triangles, axis=0)
-  plausibly_close = max_side_lengths >= eps + np.max(
-    np.linalg.norm(triangle_euc - xyz[None, None, :], axis=2), axis=1
-  )
+  vecs = triangle_euc - xyz[None, None, :]
+  sumsq = np.sum(vecs * vecs, axis=2)
+  plausibly_close = max_side_lengths2 >= EPS + np.max(sumsq, axis=1)
   dets = math_utils.calc_orientation_dets(euc, triangles[plausibly_close], xyz)
 
   contains = np.zeros(triangles.shape[0], dtype=np.bool_)
   contains[plausibly_close] = (
-    (dets[0] * dets[1] >= eps) & (dets[1] * dets[2] >= eps) & (dets[2] * dets[0] >= eps)
+    (dets[0] * dets[1] >= EPS) & (dets[1] * dets[2] >= EPS) & (dets[2] * dets[0] >= EPS)
   )
   containing_idxs = np.where(contains)[0]
   return containing_idxs[0]
@@ -190,9 +190,11 @@ def plot_map(
   tissot: bool = False,
   draw_lat: int | None = None,
   draw_lng: int | None = None,
+  countries: bool = False,
 ):
+  t = time.time()
   if source is None:
-    source = "land_shallow_topo_8192.tif"
+    source = "sources/land_shallow_topo_8192.tif"
 
   in_img = cv2.imread(source)
   in_img = cv2.cvtColor(in_img, cv2.COLOR_BGR2BGRA)
@@ -216,21 +218,23 @@ def plot_map(
 
   tissot_scale = 24
   tissot_radians = TAU / tissot_scale
-  if tissot:
+  if tissot or countries:
     euc = math_utils.calc_euc(sph_pts)
+    max_side_lengths2 = math_utils.calc_max_side_lengths2(euc, triangles)
+
+  if countries:
+    draw_countries(euc, triangles, max_side_lengths2, out_xys, out_img, color=[255, 255, 255, 100])
+
+  if tissot:
     for i in range(1, tissot_scale):
       for j in range(1, tissot_scale // 2):
-        theta = i * tissot_radians
-        phi = j * tissot_radians
-        max_side_lengths = math_utils.calc_max_side_lengths(euc, triangles)
+        xyz = math_utils.calc_euc(np.array([[theta, phi]]))[0]
         triangle_idx = find_triangle_containing(
-          euc, triangles, theta, phi, max_side_lengths
+          euc, triangles, xyz, phi, max_side_lengths2
         )
         triangle = triangles[triangle_idx]
 
         draw_tissot_ellipse(euc, triangle, out_xys, theta, phi, out_img)
-        # poor man's approximation for whether the spherical triangle contains
-        # this theta and phi
 
   if draw_lines:
     for idxs in triangles:
@@ -277,6 +281,7 @@ def plot_map(
           color=[255, 255, 255, 255],
           thickness=2,
         )
+  print('drew map in', time.time() - t)
 
   fname = f"{title}_{step:05d}.png" if step is not None else f"{title}.png"
   dir_ = f"results/{name}"
@@ -347,6 +352,47 @@ def plot_mults(
   plt.savefig(f"results/{name}/mults.png")
   if show:
     plt.show()
+
+
+def project_path(path_sph, euc, triangles, max_side_lengths2, out_xys):
+  """Convert a spherical path (N×2 theta/phi array, radians) to projected pixel coordinates.
+  Uses barycentric interpolation within the containing triangle for each point.
+  Points not contained in any triangle are skipped."""
+  pts = []
+  xyz = math_utils.calc_euc(path_sph)
+  for this_xyz in xyz:
+    idx = find_triangle_containing(euc, triangles, this_xyz, max_side_lengths2)
+    dets = math_utils.calc_orientation_dets(euc, triangles[idx:idx + 1], this_xyz)
+    weights = np.array([d[0] for d in dets])
+    weights /= weights.sum()
+    pts.append(weights @ out_xys[triangles[idx]])
+  return np.array(pts) if pts else np.empty((0, 2))
+
+
+def draw_filled_path(path_sph, euc, triangles, max_side_lengths2, out_xys, out_img, color):
+  """Draw a filled closed polygon defined by a spherical path onto out_img.
+  path_sph: N×2 array of (theta, phi) in radians."""
+  pts = project_path(path_sph, euc, triangles, max_side_lengths2, out_xys)
+  if len(pts) < 3:
+    return
+  cv2.fillPoly(out_img, [np.round(pts).astype(np.int32)], color=color)
+
+
+def draw_countries(euc, triangles, max_side_lengths2, out_xys, out_img, color, shapefile_path='sources/ne_110m_admin_0_countries/ne_110m_admin_0_countries.shp'):
+  """Draw all country borders from a Natural Earth shapefile onto out_img."""
+  import shapefile as pyshp
+  sf = pyshp.Reader(shapefile_path)
+  for shape in sf.iterShapes():
+    parts = list(shape.parts) + [len(shape.points)]
+    for i in range(len(shape.parts)):
+      ring = np.array(shape.points[parts[i]:parts[i + 1]])
+      theta = (ring[:, 0] + 180) / 360 * TAU
+      phi = (90 - ring[:, 1]) / 180 * (TAU / 2)
+      path_sph = np.stack([theta, phi], axis=1)
+      pts = project_path(path_sph, euc, triangles, max_side_lengths2, out_xys)
+      if len(pts) < 2:
+        continue
+      cv2.polylines(out_img, [np.round(pts).astype(np.int32)[:, None, :]], isClosed=True, color=color, thickness=1)
 
 
 def detect_water(source):

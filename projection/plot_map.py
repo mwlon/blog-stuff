@@ -89,6 +89,11 @@ parser.add_argument(
   type=int,
   help="draw a line of longitude every N degrees",
 )
+parser.add_argument(
+  "--countries",
+  action="store_true",
+  help="overlay country borders",
+)
 
 args = parser.parse_args()
 show = args.show
@@ -123,6 +128,7 @@ if args.all_traditional:
       draw_lines=args.draw_lines,
       scale=args.scale,
       tissot=args.tissot,
+      countries=args.countries,
     )
 
     if args.distortion:
@@ -168,6 +174,7 @@ if args.trained is not None:
     tissot=args.tissot,
     draw_lat=args.draw_lat,
     draw_lng=args.draw_lng,
+    countries=args.countries,
   )
 
   if args.distortion:

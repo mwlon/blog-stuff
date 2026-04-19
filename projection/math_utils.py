@@ -169,9 +169,10 @@ def calc_orientation_dets(euc, triangles, xyz):
 
   return dets
 
-
-def calc_max_side_lengths(euc, triangles):
+def calc_max_side_lengths2(euc, triangles):
   x = euc[triangles[:, 0]]
   y = euc[triangles[:, 1]]
   z = euc[triangles[:, 2]]
-  return np.max(np.linalg.norm(np.stack([x - y, y - z, z - x], axis=1), axis=2), axis=1)
+  vecs = np.stack([x - y, y - z, z - x], axis=1)
+  sumsq = np.sum(vecs * vecs, axis=2)
+  return np.max(sumsq, axis=1)
