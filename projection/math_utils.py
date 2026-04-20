@@ -155,19 +155,20 @@ def det3(x):
   )
 
 
-def calc_orientation_dets(euc, triangles, xyz):
-  tiled_xyz = np.tile(
-    xyz,
-    [triangles.shape[0], 1],
-  )
+def calc_orientation_dets(triangle_euc, xyz):
+  # xyz can be [3] for a single point (broadcast to all triangles)
+  # or [N, 3] for one point per triangle
+  if xyz.ndim == 1:
+    xyz = np.tile(xyz, [triangle_euc.shape[0], 1])
   dets = []
   for vertex_i, vertex_j in [(1, 2), (2, 0), (0, 1)]:
-    a = euc[triangles[:, vertex_i]]
-    b = euc[triangles[:, vertex_j]]
-    mats = np.stack([a, b, tiled_xyz], axis=1)
+    a = triangle_euc[:, vertex_i]
+    b = triangle_euc[:, vertex_j]
+    mats = np.stack([a, b, xyz], axis=1)
     dets.append(det3(mats))
 
   return dets
+
 
 def calc_max_side_lengths2(euc, triangles):
   x = euc[triangles[:, 0]]

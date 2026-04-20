@@ -1,12 +1,16 @@
 import numpy as np
+from tqdm import tqdm
 import time
 import matplotlib as mpl
 import cv2
+from pyarrow import parquet as pq
+from pyarrow import Table
 from matplotlib import pyplot as plt
 from typing import Optional
 import os
 import math_utils
 import itertools
+from pcodec import ChunkConfig, standalone
 
 TAU = 2 * np.pi
 EPS = -1e-24
@@ -127,19 +131,42 @@ def calc_sub_pts(sph, out_xy):
   return [(np.array(x)[:, :2], np.array(x)[:, 2:]) for x in sub_pts]
 
 
-def find_triangle_containing(euc, triangles, xyz, max_side_lengths2):
+def find_triangle_containing(
+  triangle_euc, xyz, max_side_lengths2, recent_indices=None, kdtree=None, k=20
+):
   # https://graphallthethings.com/posts/interpolation/
+  if recent_indices:
+    recent = np.array(recent_indices)
+    dets = math_utils.calc_orientation_dets(triangle_euc[recent], xyz)
+    mask = (
+      (dets[0] * dets[1] >= EPS)
+      & (dets[1] * dets[2] >= EPS)
+      & (dets[2] * dets[0] >= EPS)
+    )
+    hits = recent[mask]
+    if len(hits):
+      return hits[0]
+  if kdtree is not None:
+    _, candidate_idxs = kdtree.query(xyz, k=k)
+    dets = math_utils.calc_orientation_dets(triangle_euc[candidate_idxs], xyz)
+    mask = (
+      (dets[0] * dets[1] >= EPS)
+      & (dets[1] * dets[2] >= EPS)
+      & (dets[2] * dets[0] >= EPS)
+    )
+    hits = candidate_idxs[mask]
+    if len(hits):
+      return hits[0]
   # For performance, we filter out triangles whose max side length is less than
   # the furthest vertex's distance to the target coordinates.
   # This check also serves the purpose of eliminating triangles on the opposite
   # side of the globe, which would otherwise be false positives.
-  triangle_euc = np.take(euc, triangles, axis=0)
   vecs = triangle_euc - xyz[None, None, :]
   sumsq = np.sum(vecs * vecs, axis=2)
   plausibly_close = max_side_lengths2 >= EPS + np.max(sumsq, axis=1)
-  dets = math_utils.calc_orientation_dets(euc, triangles[plausibly_close], xyz)
+  dets = math_utils.calc_orientation_dets(triangle_euc[plausibly_close], xyz)
 
-  contains = np.zeros(triangles.shape[0], dtype=np.bool_)
+  contains = np.zeros(triangle_euc.shape[0], dtype=np.bool_)
   contains[plausibly_close] = (
     (dets[0] * dets[1] >= EPS) & (dets[1] * dets[2] >= EPS) & (dets[2] * dets[0] >= EPS)
   )
@@ -190,14 +217,19 @@ def plot_map(
   tissot: bool = False,
   draw_lat: int | None = None,
   draw_lng: int | None = None,
-  countries: bool = False,
+  shapefile: str | None = None,
+  mapcolor_field: str = "MAPCOLORC",
 ):
   t = time.time()
   if source is None:
     source = "sources/land_shallow_topo_8192.tif"
 
-  in_img = cv2.imread(source)
-  in_img = cv2.cvtColor(in_img, cv2.COLOR_BGR2BGRA)
+  if source.startswith("#"):
+    r, g, b = int(source[1:3], 16), int(source[3:5], 16), int(source[5:7], 16)
+    in_img = np.full((2, 2, 4), [b, g, r, 255], dtype=np.uint8)
+  else:
+    in_img = cv2.imread(source)
+    in_img = cv2.cvtColor(in_img, cv2.COLOR_BGR2BGRA)
   sph_pts = np.array(sph_pts)
   xy_pts = np.array(xy_pts)
   xy_pts -= np.min(xy_pts, axis=0)[None, :]
@@ -206,7 +238,7 @@ def plot_map(
   out_xys = calc_out_xys(xy_pts, out_w=out_w, out_h=out_h, max_x=max_x, max_y=max_y)
   out_img = np.full([out_h, out_w, 4], 0).astype(in_img.dtype)  # transparent
 
-  for idxs in triangles:
+  for idxs in tqdm(triangles, desc="projecting triangles"):
     sub_pts = calc_sub_pts(sph_pts[idxs], out_xys[idxs])
     for sub_sph, sub_xy in sub_pts:
       fill_between(
@@ -218,19 +250,29 @@ def plot_map(
 
   tissot_scale = 24
   tissot_radians = TAU / tissot_scale
-  if tissot or countries:
+  if tissot or shapefile:
     euc = math_utils.calc_euc(sph_pts)
     max_side_lengths2 = math_utils.calc_max_side_lengths2(euc, triangles)
 
-  if countries:
-    draw_countries(euc, triangles, max_side_lengths2, out_xys, out_img, color=[255, 255, 255, 100])
+  if shapefile:
+    draw_countries(
+      name,
+      euc,
+      triangles,
+      max_side_lengths2,
+      out_xys,
+      out_img,
+      shapefile_path=shapefile,
+      mapcolor_field=mapcolor_field,
+    )
 
   if tissot:
+    triangle_euc = np.take(euc, triangles, axis=0)
     for i in range(1, tissot_scale):
       for j in range(1, tissot_scale // 2):
         xyz = math_utils.calc_euc(np.array([[theta, phi]]))[0]
         triangle_idx = find_triangle_containing(
-          euc, triangles, xyz, phi, max_side_lengths2
+          triangle_euc, xyz, phi, max_side_lengths2
         )
         triangle = triangles[triangle_idx]
 
@@ -281,7 +323,7 @@ def plot_map(
           color=[255, 255, 255, 255],
           thickness=2,
         )
-  print('drew map in', time.time() - t)
+  print("drew map in", time.time() - t)
 
   fname = f"{title}_{step:05d}.png" if step is not None else f"{title}.png"
   dir_ = f"results/{name}"
@@ -354,45 +396,98 @@ def plot_mults(
     plt.show()
 
 
-def project_path(path_sph, euc, triangles, max_side_lengths2, out_xys):
-  """Convert a spherical path (N×2 theta/phi array, radians) to projected pixel coordinates.
-  Uses barycentric interpolation within the containing triangle for each point.
-  Points not contained in any triangle are skipped."""
-  pts = []
-  xyz = math_utils.calc_euc(path_sph)
-  for this_xyz in xyz:
-    idx = find_triangle_containing(euc, triangles, this_xyz, max_side_lengths2)
-    dets = math_utils.calc_orientation_dets(euc, triangles[idx:idx + 1], this_xyz)
-    weights = np.array([d[0] for d in dets])
-    weights /= weights.sum()
-    pts.append(weights @ out_xys[triangles[idx]])
-  return np.array(pts) if pts else np.empty((0, 2))
-
-
-def draw_filled_path(path_sph, euc, triangles, max_side_lengths2, out_xys, out_img, color):
-  """Draw a filled closed polygon defined by a spherical path onto out_img.
-  path_sph: N×2 array of (theta, phi) in radians."""
-  pts = project_path(path_sph, euc, triangles, max_side_lengths2, out_xys)
-  if len(pts) < 3:
-    return
-  cv2.fillPoly(out_img, [np.round(pts).astype(np.int32)], color=color)
-
-
-def draw_countries(euc, triangles, max_side_lengths2, out_xys, out_img, color, shapefile_path='sources/ne_110m_admin_0_countries/ne_110m_admin_0_countries.shp'):
-  """Draw all country borders from a Natural Earth shapefile onto out_img."""
+def _load_or_compute_indices(
+  name, shapefile_path, triangle_euc, triangles, max_side_lengths2
+):
+  stem = os.path.splitext(os.path.basename(shapefile_path))[0]
+  cache_path = f"results/{name}/{stem}_indices.pco"
+  if os.path.exists(cache_path):
+    return standalone.simple_decompress(open(cache_path, "rb").read()).astype(np.int32)
   import shapefile as pyshp
+
   sf = pyshp.Reader(shapefile_path)
-  for shape in sf.iterShapes():
-    parts = list(shape.parts) + [len(shape.points)]
+  all_points = np.array([p for s in sf.iterShapes() for p in s.points])
+  theta = (all_points[:, 0] + 180) / 360 * TAU
+  phi = (90 - all_points[:, 1]) / 180 * (TAU / 2)
+  xyz = math_utils.calc_euc(np.stack([theta, phi], axis=1))
+
+  from scipy.spatial import KDTree
+
+  kdtree = KDTree(triangle_euc.mean(axis=1))
+
+  def compute_indices(xyz, n_recent=3):
+    recent = []
+    for x in tqdm(xyz, desc="building shapefile index cache"):
+      idx = find_triangle_containing(
+        triangle_euc, x, max_side_lengths2, recent_indices=recent, kdtree=kdtree
+      )
+      if idx not in recent:
+        if len(recent) == n_recent:
+          recent.pop(0)
+        recent.append(idx)
+      yield idx
+
+  indices = np.fromiter(compute_indices(xyz), dtype=np.int32, count=len(xyz))
+  with open(cache_path, "wb") as f:
+    f.write(standalone.simple_compress(indices, ChunkConfig()))
+  return indices
+
+
+DEFAULT_MAPCOLORS = [
+  [80, 110, 170, 255],  # orange
+  [80, 140, 55, 255],  # green
+  [180, 115, 65, 255],  # turquoise
+  [110, 80, 160, 255],  # red
+  [190, 80, 140, 255],  # purple
+  [70, 145, 135, 255],  # yellow
+  [255, 255, 255, 255],  # white
+]
+
+
+def draw_countries(
+  name,
+  euc,
+  triangles,
+  max_side_lengths2,
+  out_xys,
+  out_img,
+  shapefile_path,
+  mapcolor_field,
+):
+  """Draw filled countries using mapcolor_field to index fill_colors."""
+  import shapefile as pyshp
+
+  fill_colors = DEFAULT_MAPCOLORS
+
+  triangle_euc = np.take(euc, triangles, axis=0)
+  indices = _load_or_compute_indices(
+    name, shapefile_path, triangle_euc, triangles, max_side_lengths2
+  )
+
+  # Project all shapefile points at once
+  sf = pyshp.Reader(shapefile_path)
+  all_lonlat = np.array([p for s in sf.iterShapes() for p in s.points])
+  all_theta = (all_lonlat[:, 0] + 180) / 360 * TAU
+  all_phi = (90 - all_lonlat[:, 1]) / 180 * (TAU / 2)
+  all_xyz = math_utils.calc_euc(np.stack([all_theta, all_phi], axis=1))
+  dets = math_utils.calc_orientation_dets(triangle_euc[indices], all_xyz)
+  weights = np.stack(dets, axis=1)  # [total_pts, 3]
+  weights /= weights.sum(axis=1, keepdims=True)
+  all_projected = np.einsum("ni,nij->nj", weights, out_xys[triangles[indices]])
+
+  pt_offset = 0
+  for sr in tqdm(sf.iterShapeRecords(), desc="drawing shapes", total=len(sf)):
+    fill_color = fill_colors[sr.record[mapcolor_field] - 1]
+    shape = sr.shape
+    n_pts = len(shape.points)
+    parts = list(shape.parts) + [n_pts]
     for i in range(len(shape.parts)):
-      ring = np.array(shape.points[parts[i]:parts[i + 1]])
-      theta = (ring[:, 0] + 180) / 360 * TAU
-      phi = (90 - ring[:, 1]) / 180 * (TAU / 2)
-      path_sph = np.stack([theta, phi], axis=1)
-      pts = project_path(path_sph, euc, triangles, max_side_lengths2, out_xys)
-      if len(pts) < 2:
+      pts = all_projected[pt_offset + parts[i] : pt_offset + parts[i + 1]]
+      if len(pts) < 3:
         continue
-      cv2.polylines(out_img, [np.round(pts).astype(np.int32)[:, None, :]], isClosed=True, color=color, thickness=1)
+      pts_int = np.round(pts).astype(np.int32)
+      cv2.fillPoly(out_img, [pts_int], color=fill_color)
+    pt_offset += n_pts
 
 
 def detect_water(source):

@@ -90,9 +90,15 @@ parser.add_argument(
   help="draw a line of longitude every N degrees",
 )
 parser.add_argument(
-  "--countries",
-  action="store_true",
-  help="overlay country borders",
+  "--shapefile",
+  type=str,
+  help="path to shapefile for overlaying country borders",
+)
+parser.add_argument(
+  "--mapcolor-field",
+  type=str,
+  default="MAPCOLORC",
+  help="shapefile field to use for country fill color index",
 )
 
 args = parser.parse_args()
@@ -128,7 +134,8 @@ if args.all_traditional:
       draw_lines=args.draw_lines,
       scale=args.scale,
       tissot=args.tissot,
-      countries=args.countries,
+      shapefile=args.shapefile,
+      mapcolor_field=args.mapcolor_field,
     )
 
     if args.distortion:
@@ -174,7 +181,8 @@ if args.trained is not None:
     tissot=args.tissot,
     draw_lat=args.draw_lat,
     draw_lng=args.draw_lng,
-    countries=args.countries,
+    shapefile=args.shapefile,
+    mapcolor_field=args.mapcolor_field,
   )
 
   if args.distortion:
