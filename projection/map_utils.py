@@ -218,7 +218,7 @@ def plot_map(
   draw_lat: int | None = None,
   draw_lng: int | None = None,
   shapefile: str | None = None,
-  mapcolor_field: str = "MAPCOLORC",
+  mapcolor_field: str | None = None,
 ):
   t = time.time()
   if source is None:
@@ -434,7 +434,7 @@ def _load_or_compute_indices(
 
 
 DEFAULT_MAPCOLORS = [
-  [80, 110, 170, 255],  # orange
+  [80, 115, 170, 255],  # orange
   [80, 140, 55, 255],  # green
   [180, 115, 65, 255],  # turquoise
   [115, 85, 170, 255],  # red
@@ -457,6 +457,7 @@ def draw_countries(
   """Draw filled countries using mapcolor_field to index fill_colors."""
   import shapefile as pyshp
 
+  assert mapcolor_field is not None
   fill_colors = DEFAULT_MAPCOLORS
 
   triangle_euc = np.take(euc, triangles, axis=0)

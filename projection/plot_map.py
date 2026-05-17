@@ -97,7 +97,7 @@ parser.add_argument(
 parser.add_argument(
   "--mapcolor-field",
   type=str,
-  default="MAPCOLORC",
+  default="MAPCOLORD",
   help="shapefile field to use for country fill color index",
 )
 
